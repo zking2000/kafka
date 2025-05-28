@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zookeeper-config
+  namespace: kafka
+data:
+  zoo.cfg: |
+    tickTime=2000
+    initLimit=10
+    syncLimit=5
+    dataDir=/var/lib/zookeeper/data
+    dataLogDir=/var/lib/zookeeper/log
+    clientPort=2181
+    secureClientPort=2182
+    serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
+    authProvider.x509=org.apache.zookeeper.server.auth.X509AuthenticationProvider
+    ssl.keyStore.location=/etc/kafka/secrets/zookeeper-server-tls/keystore.jks
+    ssl.keyStore.password=changeit
+    ssl.trustStore.location=/etc/kafka/secrets/zookeeper-server-tls/truststore.jks
+    ssl.trustStore.password=changeit
+    ssl.clientAuth=need
+    ssl.quorum.keyStore.location=/etc/kafka/secrets/zookeeper-server-tls/keystore.jks
+    ssl.quorum.keyStore.password=changeit
+    ssl.quorum.trustStore.location=/etc/kafka/secrets/zookeeper-server-tls/truststore.jks
+    ssl.quorum.trustStore.password=changeit
+    ssl.quorum.clientAuth=need 

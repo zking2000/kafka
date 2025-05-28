@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-config
+  namespace: kafka
+data:
+  server.properties: |
+    # Broker配置
+    broker.id=1
+    listeners=PLAINTEXT://0.0.0.0:9092,SSL://0.0.0.0:9093
+    advertised.listeners=PLAINTEXT://kafka-service:9092,SSL://kafka-service:9093
+    listener.security.protocol.map=PLAINTEXT:PLAINTEXT,SSL:SSL
+    inter.broker.listener.name=SSL
+    
+    # Zookeeper连接
+    zookeeper.connect=zookeeper-service:2182
+    zookeeper.ssl.client.enable=true
+    zookeeper.ssl.keystore.location=/etc/kafka/secrets/kafka-server-tls/keystore.jks
+    zookeeper.ssl.keystore.password=changeit
+    zookeeper.ssl.truststore.location=/etc/kafka/secrets/kafka-server-tls/truststore.jks
+    zookeeper.ssl.truststore.password=changeit
+    
+    # SSL配置
+    ssl.keystore.location=/etc/kafka/secrets/kafka-server-tls/keystore.jks
+    ssl.keystore.password=changeit
+    ssl.key.password=changeit
+    ssl.truststore.location=/etc/kafka/secrets/kafka-server-tls/truststore.jks
+    ssl.truststore.password=changeit
+    ssl.client.auth=required
+    ssl.enabled.protocols=TLSv1.2,TLSv1.3
+    ssl.keystore.type=JKS
+    ssl.truststore.type=JKS
+    
+    # 日志配置
+    log.dirs=/var/lib/kafka/logs
+    num.network.threads=3
+    num.io.threads=8
+    socket.send.buffer.bytes=102400
+    socket.receive.buffer.bytes=102400
+    socket.request.max.bytes=104857600
+    
+    # 分区配置
+    num.partitions=3
+    num.recovery.threads.per.data.dir=1
+    offsets.topic.replication.factor=1
+    transaction.state.log.replication.factor=1
+    transaction.state.log.min.isr=1
+    
+    # 日志保留配置
+    log.retention.hours=168
+    log.segment.bytes=1073741824
+    log.retention.check.interval.ms=300000
+    
+    # 监控配置
+    jmx.port=9999
+    
+  log4j.properties: |
+    log4j.rootLogger=INFO, stdout
+    log4j.appender.stdout=org.apache.log4j.ConsoleAppender
+    log4j.appender.stdout.layout=org.apache.log4j.PatternLayout
+    log4j.appender.stdout.layout.ConversionPattern=[%d] %p %m (%c)%n
+    
+    # 减少一些冗余日志
+    log4j.logger.kafka.request.logger=WARN, stdout
+    log4j.logger.kafka.network.RequestChannel$=WARN, stdout
+    log4j.logger.kafka.controller=TRACE, stdout
+    log4j.logger.kafka.log.LogCleaner=INFO, stdout
+    log4j.logger.state.change.logger=TRACE, stdout 
