@@ -105,10 +105,10 @@ spec:
               ;;
           esac
           
-          # 配置advertised.listeners - 内部使用K8s DNS，外部使用Cloud DNS
-          ADVERTISED_LISTENERS="INTERNAL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9092,EXTERNAL_SSL://${EXTERNAL_DOMAIN}:9094"
+          # 配置advertised.listeners - 客户端使用Cloud DNS，内部通信使用内部DNS
+          ADVERTISED_LISTENERS="EXTERNAL_SSL://${EXTERNAL_DOMAIN}:9094,EXTERNAL_PLAIN://${EXTERNAL_DOMAIN}:9092"
           
-          # 根据节点数量动态生成quorum voters - 控制器通信仍使用内部DNS
+          # 根据节点数量动态生成quorum voters - 控制器通信使用内部DNS保证稳定性
           if [ "$KAFKA_NODE_ID" = "0" ]; then
             # 第一个节点 - 启动为单节点集群
             CONTROLLER_QUORUM_VOTERS="0@${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9093"
@@ -131,12 +131,12 @@ spec:
           node.id=${KAFKA_NODE_ID}
           controller.quorum.voters=${CONTROLLER_QUORUM_VOTERS}
           
-          # 监听器配置
-          listeners=INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL_SSL://0.0.0.0:9094
+          # 监听器配置 - 全部使用外部可访问的端口
+          listeners=EXTERNAL_PLAIN://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL_SSL://0.0.0.0:9094
           advertised.listeners=${ADVERTISED_LISTENERS}
-          listener.security.protocol.map=INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL_SSL:SSL
+          listener.security.protocol.map=EXTERNAL_PLAIN:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL_SSL:SSL
           controller.listener.names=CONTROLLER
-          inter.broker.listener.name=INTERNAL
+          inter.broker.listener.name=EXTERNAL_PLAIN
           
           # SSL/TLS 配置 for EXTERNAL_SSL
           listener.name.external_ssl.ssl.keystore.location=/opt/kafka/config/ssl/kafka.server.keystore.jks
