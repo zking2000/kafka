@@ -51,31 +51,85 @@ spec:
     app: kafka
 
 ---
+# Kafka-0 Internal LoadBalancer Service
 apiVersion: v1
 kind: Service
 metadata:
-  name: kafka-external-ssl
+  name: kafka-0-internal
   namespace: confluent-kafka
   labels:
     app: kafka
+    instance: kafka-0
   annotations:
-    cloud.google.com/load-balancer-type: "External"
-    # 可选：如果需要更高级的负载均衡配置
-    # cloud.google.com/backend-config: '{"default": "kafka-backend-config"}'
+    networking.gke.io/load-balancer-type: "Internal"
+    cloud.google.com/load-balancer-type: "Internal"
 spec:
   type: LoadBalancer
+  selector:
+    app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-0
   ports:
   - port: 9094
-    name: kafka-0-ssl
+    name: external-ssl
     targetPort: 9094
-    nodePort: 30094
-  - port: 9095
-    name: kafka-1-ssl
-    targetPort: 9094
-    nodePort: 30095
-  - port: 9096
-    name: kafka-2-ssl
-    targetPort: 9094
-    nodePort: 30096
+    protocol: TCP
+  - port: 9092
+    name: internal
+    targetPort: 9092
+    protocol: TCP
+
+---
+# Kafka-1 Internal LoadBalancer Service  
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-1-internal
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    instance: kafka-1
+  annotations:
+    networking.gke.io/load-balancer-type: "Internal"
+    cloud.google.com/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
   selector:
-    app: kafka 
+    app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-1
+  ports:
+  - port: 9094
+    name: external-ssl
+    targetPort: 9094
+    protocol: TCP
+  - port: 9092
+    name: internal
+    targetPort: 9092
+    protocol: TCP
+
+---
+# Kafka-2 Internal LoadBalancer Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-2-internal
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    instance: kafka-2
+  annotations:
+    networking.gke.io/load-balancer-type: "Internal"
+    cloud.google.com/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
+  selector:
+    app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-2
+  ports:
+  - port: 9094
+    name: external-ssl
+    targetPort: 9094
+    protocol: TCP
+  - port: 9092
+    name: internal
+    targetPort: 9092
+    protocol: TCP 
