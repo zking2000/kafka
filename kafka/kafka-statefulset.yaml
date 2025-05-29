@@ -1,0 +1,180 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - kafka
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:7.4.0
+        ports:
+        - containerPort: 9092
+          name: internal
+        - containerPort: 9093
+          name: external
+        - containerPort: 9094
+          name: internal-ssl
+        env:
+        - name: KAFKA_BROKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: "zookeeper-0.zookeeper-headless.confluent-kafka.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.confluent-kafka.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.confluent-kafka.svc.cluster.local:2181"
+        - name: KAFKA_LISTENERS
+          value: "PLAINTEXT://0.0.0.0:9092"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+          value: "1"
+        
+        # 监听器配置
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+        - name: KAFKA_INTER_BROKER_LISTENER_NAME
+          value: "INTERNAL"
+        
+        # SSL/TLS配置 - 暂时禁用以便调试
+        # - name: KAFKA_SSL_KEYSTORE_FILENAME
+        #   value: "kafka.server.keystore.jks"
+        # - name: KAFKA_SSL_KEYSTORE_CREDENTIALS
+        #   value: "keystore_creds"
+        # - name: KAFKA_SSL_KEY_CREDENTIALS
+        #   value: "key_creds"
+        # - name: KAFKA_SSL_TRUSTSTORE_FILENAME
+        #   value: "kafka.server.truststore.jks"
+        # - name: KAFKA_SSL_TRUSTSTORE_CREDENTIALS
+        #   value: "truststore_creds"
+        # - name: KAFKA_SSL_KEYSTORE_PASSWORD
+        #   value: "password"
+        # - name: KAFKA_SSL_KEY_PASSWORD
+        #   value: "password"
+        # - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+        #   value: "password"
+        # - name: KAFKA_SSL_CLIENT_AUTH
+        #   value: "required"
+        # - name: KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
+        #   value: "HTTPS"
+        
+        # 性能和稳定性配置
+        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_MIN_INSYNC_REPLICAS
+          value: "2"
+        - name: KAFKA_NUM_PARTITIONS
+          value: "6"
+        - name: KAFKA_LOG_RETENTION_HOURS
+          value: "168"
+        - name: KAFKA_LOG_RETENTION_BYTES
+          value: "1073741824"
+        - name: KAFKA_LOG_SEGMENT_BYTES
+          value: "1073741824"
+        - name: KAFKA_JMX_PORT
+          value: "9999"
+        - name: KAFKA_JMX_HOSTNAME
+          value: "localhost"
+        
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /var/lib/kafka/data
+        - name: kafka-logs
+          mountPath: /opt/kafka/logs
+        # SSL相关挂载暂时禁用
+        # - name: kafka-secrets
+        #   mountPath: /etc/kafka/secrets
+        #   readOnly: true
+        # - name: kafka-ssl-config
+        #   mountPath: /etc/kafka/ssl
+        #   readOnly: true
+        
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 4Gi
+          limits:
+            cpu: 2000m
+            memory: 8Gi
+        
+        readinessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          
+        livenessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        
+        command:
+        - sh
+        - -c
+        - |
+          echo "=== Kafka启动调试 ==="
+          echo "HOSTNAME: $(hostname)"
+          echo "KAFKA_BROKER_ID: $KAFKA_BROKER_ID"
+          echo "KAFKA_ZOOKEEPER_CONNECT: $KAFKA_ZOOKEEPER_CONNECT"
+          echo "KAFKA_LISTENERS: $KAFKA_LISTENERS"
+          
+          # 动态设置ADVERTISED_LISTENERS
+          export KAFKA_ADVERTISED_LISTENERS="PLAINTEXT://$(hostname).kafka-headless.confluent-kafka.svc.cluster.local:9092"
+          echo "KAFKA_ADVERTISED_LISTENERS: $KAFKA_ADVERTISED_LISTENERS"
+          echo "========================"
+          
+          # 启动Kafka
+          exec /etc/confluent/docker/run
+      
+      volumes:
+      - name: kafka-secrets
+        secret:
+          secretName: kafka-keystore
+      - name: kafka-ssl-config
+        configMap:
+          name: kafka-ssl-config
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: kafka-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: ssd
+      resources:
+        requests:
+          storage: 100Gi
+  - metadata:
+      name: kafka-logs
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: ssd
+      resources:
+        requests:
+          storage: 50Gi 

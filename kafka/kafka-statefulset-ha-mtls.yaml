@@ -1,0 +1,218 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - kafka
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: kafka
+        image: apache/kafka:latest
+        ports:
+        - containerPort: 9092
+          name: internal
+        - containerPort: 9093
+          name: controller
+        - containerPort: 9094
+          name: external-ssl
+        env:
+        - name: KAFKA_BROKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+        - name: KAFKA_PROCESS_ROLES
+          value: "broker,controller"
+        - name: KAFKA_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+        - name: KAFKA_LOG_DIRS
+          value: "/var/lib/kafka/data"
+        - name: CLUSTER_ID
+          value: "Y2x1c3Rlci1pZC1mb3Ita2FmY2EtaGEtbXRscw"
+        
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          
+          echo "=== 启动高可用mTLS Kafka集群 ==="
+          echo "节点: $(hostname)"
+          echo "Broker ID: $KAFKA_BROKER_ID"
+          
+          # 设置目录权限
+          mkdir -p /var/lib/kafka/data
+          rm -rf /var/lib/kafka/data/lost+found 2>/dev/null || true
+          
+          # 设置keystore和truststore文件
+          mkdir -p /opt/kafka/config/ssl
+          cp /etc/kafka/keystore/* /opt/kafka/config/ssl/ || true
+          
+          # 动态生成advertised.listeners
+          POD_NAME=$(hostname)
+          ADVERTISED_LISTENERS="INTERNAL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9092,EXTERNAL_SSL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9094"
+          
+          # 根据节点数量动态生成quorum voters
+          if [ "$KAFKA_NODE_ID" = "0" ]; then
+            # 第一个节点 - 启动为单节点集群
+            CONTROLLER_QUORUM_VOTERS="0@${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9093"
+            MIN_ISR="1"
+            REPLICATION_FACTOR="1"
+          else
+            # 其他节点 - 等待第一个节点启动后再配置多节点
+            CONTROLLER_QUORUM_VOTERS="0@kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9093,1@kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9093,2@kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9093"
+            MIN_ISR="2"
+            REPLICATION_FACTOR="3"
+          fi
+          
+          echo "Controller Quorum Voters: $CONTROLLER_QUORUM_VOTERS"
+          echo "Advertised Listeners: $ADVERTISED_LISTENERS"
+          
+          # 创建服务器配置文件
+          cat > /opt/kafka/config/server.properties << EOF
+          # 基础配置
+          process.roles=broker,controller
+          node.id=${KAFKA_NODE_ID}
+          controller.quorum.voters=${CONTROLLER_QUORUM_VOTERS}
+          
+          # 监听器配置
+          listeners=INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL_SSL://0.0.0.0:9094
+          advertised.listeners=${ADVERTISED_LISTENERS}
+          listener.security.protocol.map=INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL_SSL:SSL
+          controller.listener.names=CONTROLLER
+          inter.broker.listener.name=INTERNAL
+          
+          # SSL/TLS 配置 for EXTERNAL_SSL
+          listener.name.external_ssl.ssl.keystore.location=/opt/kafka/config/ssl/kafka.server.keystore.jks
+          listener.name.external_ssl.ssl.keystore.password=password
+          listener.name.external_ssl.ssl.key.password=password
+          listener.name.external_ssl.ssl.truststore.location=/opt/kafka/config/ssl/kafka.server.truststore.jks
+          listener.name.external_ssl.ssl.truststore.password=password
+          listener.name.external_ssl.ssl.client.auth=required
+          listener.name.external_ssl.ssl.endpoint.identification.algorithm=
+          
+          # 日志配置
+          log.dirs=/var/lib/kafka/data
+          num.network.threads=8
+          num.io.threads=16
+          socket.send.buffer.bytes=102400
+          socket.receive.buffer.bytes=102400
+          socket.request.max.bytes=104857600
+          
+          # 复制设置 - 动态配置
+          default.replication.factor=${REPLICATION_FACTOR}
+          min.insync.replicas=${MIN_ISR}
+          offsets.topic.replication.factor=${REPLICATION_FACTOR}
+          transaction.state.log.replication.factor=${REPLICATION_FACTOR}
+          transaction.state.log.min.isr=${MIN_ISR}
+          
+          # 性能优化
+          num.partitions=6
+          num.recovery.threads.per.data.dir=4
+          log.retention.hours=168
+          log.segment.bytes=1073741824
+          log.retention.check.interval.ms=300000
+          log.cleanup.policy=delete
+          group.initial.rebalance.delay.ms=3000
+          
+          # JMX配置
+          jmx.port=9999
+          EOF
+          
+          # 格式化存储（仅在首次启动时）
+          if [ ! -f "/var/lib/kafka/data/meta.properties" ]; then
+            echo "格式化KRaft存储..."
+            /opt/kafka/bin/kafka-storage.sh format \
+              --config /opt/kafka/config/server.properties \
+              --cluster-id $CLUSTER_ID \
+              --ignore-formatted
+            echo "格式化完成"
+          else
+            echo "存储已格式化，跳过格式化步骤"
+          fi
+          
+          # 如果不是第一个节点，等待第一个节点启动
+          if [ "$KAFKA_NODE_ID" != "0" ]; then
+            echo "等待kafka-0启动..."
+            until nc -z kafka-0.kafka-headless.confluent-kafka.svc.cluster.local 9093; do
+              echo "等待kafka-0:9093可用..."
+              sleep 5
+            done
+            echo "kafka-0已可用，继续启动"
+          fi
+          
+          echo "启动Kafka服务器..."
+          exec /opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/server.properties
+        
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /var/lib/kafka/data
+        - name: kafka-keystore
+          mountPath: /etc/kafka/keystore
+          readOnly: true
+        
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 4Gi
+          limits:
+            cpu: 2000m
+            memory: 8Gi
+        
+        readinessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          
+        livenessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 5
+      
+      volumes:
+      - name: kafka-keystore
+        secret:
+          secretName: kafka-keystore
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: kafka-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: ssd
+      resources:
+        requests:
+          storage: 100Gi 

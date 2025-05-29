@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: confluent-kafka
+  labels:
+    app: zookeeper
+spec:
+  serviceName: zookeeper-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - zookeeper
+            topologyKey: kubernetes.io/hostname
+      initContainers:
+      - name: setup-myid
+        image: busybox:1.35
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+        command:
+        - sh
+        - -c
+        - |
+          # 从Pod名称提取数字ID (zookeeper-0 -> 0, zookeeper-1 -> 1, etc.)
+          POD_NAME=$(hostname)
+          SERVER_ID=$(echo $POD_NAME | sed 's/zookeeper-//')
+          # 添加1使ID从1开始而不是0
+          SERVER_ID=$((SERVER_ID + 1))
+          echo "设置ZooKeeper SERVER_ID: $SERVER_ID"
+          echo $SERVER_ID > /var/lib/zookeeper/data/myid
+          
+          # 创建日志目录
+          mkdir -p /var/lib/zookeeper/log
+        volumeMounts:
+        - name: zookeeper-data
+          mountPath: /var/lib/zookeeper/data
+        - name: zookeeper-logs
+          mountPath: /var/lib/zookeeper/log
+      containers:
+      - name: zookeeper
+        image: confluentinc/cp-zookeeper:7.4.0
+        ports:
+        - containerPort: 2181
+          name: client
+        - containerPort: 2888
+          name: server
+        - containerPort: 3888
+          name: leader-election
+        command:
+        - sh
+        - -c
+        - |
+          # 从Pod名称提取数字ID并设置环境变量
+          POD_NAME=$(hostname)
+          SERVER_ID=$(echo $POD_NAME | sed 's/zookeeper-//')
+          SERVER_ID=$((SERVER_ID + 1))
+          export ZOOKEEPER_SERVER_ID=$SERVER_ID
+          echo "ZooKeeper SERVER_ID 设置为: $ZOOKEEPER_SERVER_ID"
+          # 启动ZooKeeper
+          exec /etc/confluent/docker/run
+        env:
+        - name: ZOOKEEPER_CLIENT_PORT
+          value: "2181"
+        - name: ZOOKEEPER_SERVERS
+          value: "zookeeper-0.zookeeper-headless.confluent-kafka.svc.cluster.local:2888:3888;zookeeper-1.zookeeper-headless.confluent-kafka.svc.cluster.local:2888:3888;zookeeper-2.zookeeper-headless.confluent-kafka.svc.cluster.local:2888:3888"
+        - name: ZOOKEEPER_TICK_TIME
+          value: "2000"
+        - name: ZOOKEEPER_INIT_LIMIT
+          value: "5"
+        - name: ZOOKEEPER_SYNC_LIMIT
+          value: "2"
+        - name: ZOOKEEPER_MAX_CLIENT_CNXNS
+          value: "60"
+        - name: ZOOKEEPER_AUTOPURGE_SNAP_RETAIN_COUNT
+          value: "3"
+        - name: ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL
+          value: "24"
+        - name: ZOOKEEPER_DATA_DIR
+          value: "/var/lib/zookeeper/data"
+        - name: ZOOKEEPER_LOG_DIR
+          value: "/var/lib/zookeeper/log"
+        volumeMounts:
+        - name: zookeeper-data
+          mountPath: /var/lib/zookeeper/data
+        - name: zookeeper-logs
+          mountPath: /var/lib/zookeeper/log
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        readinessProbe:
+          tcpSocket:
+            port: 2181
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket:
+            port: 2181
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: shared-data
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: zookeeper-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: ssd
+      resources:
+        requests:
+          storage: 20Gi
+  - metadata:
+      name: zookeeper-logs
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: ssd
+      resources:
+        requests:
+          storage: 10Gi 

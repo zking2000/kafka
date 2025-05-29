@@ -1,0 +1,82 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+spec:
+  ports:
+  - port: 9092
+    name: internal
+    targetPort: 9092
+  - port: 9093
+    name: controller
+    targetPort: 9093
+  - port: 9094
+    name: external-ssl
+    targetPort: 9094
+  - port: 9999
+    name: jmx
+    targetPort: 9999
+  selector:
+    app: kafka
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+spec:
+  ports:
+  - port: 9092
+    name: internal
+    targetPort: 9092
+  - port: 9093
+    name: controller
+    targetPort: 9093
+  - port: 9094
+    name: external-ssl
+    targetPort: 9094
+  - port: 9999
+    name: jmx
+    targetPort: 9999
+  clusterIP: None
+  selector:
+    app: kafka
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-external-ssl
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "ssl"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:region:account:certificate/cert-id"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "9094,9095,9096"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 9094
+    name: kafka-0-ssl
+    targetPort: 9094
+    nodePort: 30094
+  - port: 9095
+    name: kafka-1-ssl
+    targetPort: 9094
+    nodePort: 30095
+  - port: 9096
+    name: kafka-2-ssl
+    targetPort: 9094
+    nodePort: 30096
+  selector:
+    app: kafka 
