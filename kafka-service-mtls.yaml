@@ -59,10 +59,9 @@ metadata:
   labels:
     app: kafka
   annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "ssl"
-    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "arn:aws:acm:region:account:certificate/cert-id"
-    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "9094,9095,9096"
+    cloud.google.com/load-balancer-type: "External"
+    # 可选：如果需要更高级的负载均衡配置
+    # cloud.google.com/backend-config: '{"default": "kafka-backend-config"}'
 spec:
   type: LoadBalancer
   ports:
