@@ -57,6 +57,15 @@ spec:
           value: "/var/lib/kafka/data"
         - name: CLUSTER_ID
           value: "Y2x1c3Rlci1pZC1mb3Ita2FmY2EtaGEtbXRscw"
+        # Cloud DNS 配置环境变量 - 请根据您的实际Cloud DNS设置修改
+        - name: CLOUD_DNS_ZONE
+          value: "kafka.internal.gcp"  # 请替换为您的Cloud DNS区域
+        - name: KAFKA_0_DOMAIN
+          value: "kafka-0.kafka.internal.gcp"  # 请替换为kafka-0的域名
+        - name: KAFKA_1_DOMAIN
+          value: "kafka-1.kafka.internal.gcp"  # 请替换为kafka-1的域名
+        - name: KAFKA_2_DOMAIN
+          value: "kafka-2.kafka.internal.gcp"  # 请替换为kafka-2的域名
         
         command:
         - sh
@@ -78,9 +87,28 @@ spec:
           
           # 动态生成advertised.listeners
           POD_NAME=$(hostname)
-          ADVERTISED_LISTENERS="INTERNAL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9092,EXTERNAL_SSL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9094"
           
-          # 根据节点数量动态生成quorum voters
+          # 根据Pod名称确定Cloud DNS域名
+          case "$POD_NAME" in
+            kafka-0)
+              EXTERNAL_DOMAIN="$KAFKA_0_DOMAIN"
+              ;;
+            kafka-1)
+              EXTERNAL_DOMAIN="$KAFKA_1_DOMAIN"
+              ;;
+            kafka-2)
+              EXTERNAL_DOMAIN="$KAFKA_2_DOMAIN"
+              ;;
+            *)
+              echo "错误: 未知的Pod名称 $POD_NAME"
+              exit 1
+              ;;
+          esac
+          
+          # 配置advertised.listeners - 内部使用K8s DNS，外部使用Cloud DNS
+          ADVERTISED_LISTENERS="INTERNAL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9092,EXTERNAL_SSL://${EXTERNAL_DOMAIN}:9094"
+          
+          # 根据节点数量动态生成quorum voters - 控制器通信仍使用内部DNS
           if [ "$KAFKA_NODE_ID" = "0" ]; then
             # 第一个节点 - 启动为单节点集群
             CONTROLLER_QUORUM_VOTERS="0@${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9093"
