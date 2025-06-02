@@ -1,0 +1,171 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    component: kafka-broker
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - port: 9092
+    name: internal-ssl
+    protocol: TCP
+    targetPort: 9092
+  - port: 9093
+    name: external-ssl
+    protocol: TCP
+    targetPort: 9093
+  - port: 9094
+    name: controller
+    protocol: TCP
+    targetPort: 9094
+  - port: 9095
+    name: kraft-api
+    protocol: TCP
+    targetPort: 9095
+  - port: 9999
+    name: jmx
+    protocol: TCP
+    targetPort: 9999
+  selector:
+    app: kafka
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    component: kafka-broker
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9092
+    name: internal-ssl
+    protocol: TCP
+    targetPort: 9092
+  - port: 9093
+    name: external-ssl
+    protocol: TCP
+    targetPort: 9093
+  - port: 9094
+    name: controller
+    protocol: TCP
+    targetPort: 9094
+  - port: 9095
+    name: kraft-api
+    protocol: TCP
+    targetPort: 9095
+  - port: 9999
+    name: jmx
+    protocol: TCP
+    targetPort: 9999
+  selector:
+    app: kafka
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-0-internal
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    component: kafka-broker
+    pod: kafka-0
+  annotations:
+    cloud.google.com/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 9094
+    name: controller
+    protocol: TCP
+    targetPort: 9094
+  - port: 9092
+    name: internal-ssl
+    protocol: TCP
+    targetPort: 9092
+  - port: 9093
+    name: external-ssl
+    protocol: TCP
+    targetPort: 9093
+  - port: 9095
+    name: kraft-api
+    protocol: TCP
+    targetPort: 9095
+  selector:
+    app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-1-internal
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    component: kafka-broker
+    pod: kafka-1
+  annotations:
+    cloud.google.com/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 9094
+    name: controller
+    protocol: TCP
+    targetPort: 9094
+  - port: 9092
+    name: internal-ssl
+    protocol: TCP
+    targetPort: 9092
+  - port: 9093
+    name: external-ssl
+    protocol: TCP
+    targetPort: 9093
+  - port: 9095
+    name: kraft-api
+    protocol: TCP
+    targetPort: 9095
+  selector:
+    app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-2-internal
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    component: kafka-broker
+    pod: kafka-2
+  annotations:
+    cloud.google.com/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 9094
+    name: controller
+    protocol: TCP
+    targetPort: 9094
+  - port: 9092
+    name: internal-ssl
+    protocol: TCP
+    targetPort: 9092
+  - port: 9093
+    name: external-ssl
+    protocol: TCP
+    targetPort: 9093
+  - port: 9095
+    name: kraft-api
+    protocol: TCP
+    targetPort: 9095
+  selector:
+    app: kafka
+    statefulset.kubernetes.io/pod-name: kafka-2 

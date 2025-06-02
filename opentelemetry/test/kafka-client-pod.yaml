@@ -1,0 +1,189 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kafka-client
+  namespace: confluent-kafka
+  labels:
+    app: kafka-client
+spec:
+  containers:
+  - name: kafka-client
+    image: confluentinc/cp-kafka:latest
+    command: ["/bin/bash"]
+    args: ["-c", "while true; do sleep 30; done"]
+    env:
+    - name: KAFKA_BOOTSTRAP_SERVERS
+      value: "kafka-0.kafka.internal.cloud:9093,kafka-1.kafka.internal.cloud:9093,kafka-2.kafka.internal.cloud:9093"
+    - name: KAFKA_SECURITY_PROTOCOL
+      value: "SSL"
+    - name: KAFKA_SSL_KEYSTORE_LOCATION
+      value: "/etc/kafka-ssl/kafka.server.keystore.jks"
+    - name: KAFKA_SSL_KEYSTORE_PASSWORD
+      value: "password123"
+    - name: KAFKA_SSL_KEY_PASSWORD
+      value: "password123"
+    - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+      value: "/etc/kafka-ssl/kafka.server.truststore.jks"
+    - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+      value: "password123"
+    - name: KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
+      value: ""
+    volumeMounts:
+    - name: kafka-ssl-certs
+      mountPath: /etc/kafka-ssl
+      readOnly: true
+    - name: kafka-pem-certs
+      mountPath: /etc/ssl/certs
+      readOnly: true
+    - name: scripts
+      mountPath: /scripts
+      readOnly: true
+  volumes:
+  - name: kafka-ssl-certs
+    secret:
+      secretName: kafka-keystore
+  - name: kafka-pem-certs
+    secret:
+      secretName: kafka-tls-certs
+  - name: scripts
+    configMap:
+      name: kafka-client-scripts
+      defaultMode: 0755
+  restartPolicy: Never
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-client-scripts
+  namespace: confluent-kafka
+data:
+  create-topics.sh: |
+    #!/bin/bash
+    echo "🔧 创建 Kafka Topics..."
+    
+    TOPICS=("otcol_traces" "otcol_logs" "otcol_metrics")
+    
+    for topic in "${TOPICS[@]}"; do
+        echo "创建 topic: $topic"
+        kafka-topics --bootstrap-server $KAFKA_BOOTSTRAP_SERVERS \
+          --command-config /scripts/client.properties \
+          --create --topic $topic \
+          --partitions 3 \
+          --replication-factor 3 \
+          --if-not-exists
+        
+        echo "验证 topic: $topic"
+        kafka-topics --bootstrap-server $KAFKA_BOOTSTRAP_SERVERS \
+          --command-config /scripts/client.properties \
+          --describe --topic $topic
+        echo "---"
+    done
+    
+    echo "✅ 所有 topics 创建完成！"
+    
+    echo "📋 列出所有 topics:"
+    kafka-topics --bootstrap-server $KAFKA_BOOTSTRAP_SERVERS \
+      --command-config /scripts/client.properties \
+      --list
+
+  consume-all-topics.sh: |
+    #!/bin/bash
+    echo "🔍 开始监控所有 OpenTelemetry Topics..."
+    
+    TOPICS=("otcol_traces" "otcol_logs" "otcol_metrics")
+    
+    # 创建日志目录
+    mkdir -p /tmp/kafka-logs
+    
+    # 为每个topic启动消费者（后台运行）
+    for topic in "${TOPICS[@]}"; do
+        echo "启动 $topic 消费者..."
+        nohup kafka-console-consumer \
+          --bootstrap-server $KAFKA_BOOTSTRAP_SERVERS \
+          --consumer.config /scripts/client.properties \
+          --topic $topic \
+          --from-beginning \
+          --property print.timestamp=true \
+          --property print.key=true \
+          --property print.headers=true \
+          > /tmp/kafka-logs/${topic}.log 2>&1 &
+        
+        echo "消费者 PID: $!"
+    done
+    
+    echo "✅ 所有消费者已启动"
+    echo "📁 日志文件位置:"
+    for topic in "${TOPICS[@]}"; do
+        echo "  - /tmp/kafka-logs/${topic}.log"
+    done
+    
+    echo "📋 监控命令："
+    echo "  查看实时日志: tail -f /tmp/kafka-logs/TOPIC_NAME.log"
+    echo "  查看所有进程: ps aux | grep kafka-console-consumer"
+    echo "  停止所有消费者: pkill -f kafka-console-consumer"
+
+  monitor-topics.sh: |
+    #!/bin/bash
+    echo "📊 实时监控 OpenTelemetry Topics..."
+    
+    TOPICS=("otcol_traces" "otcol_logs" "otcol_metrics")
+    
+    while true; do
+        clear
+        echo "=== Kafka Topics 实时监控 $(date) ==="
+        echo
+        
+        for topic in "${TOPICS[@]}"; do
+            echo "📈 Topic: $topic"
+            
+            # 获取topic信息
+            kafka-run-class kafka.tools.GetOffsetShell \
+              --bootstrap-server $KAFKA_BOOTSTRAP_SERVERS \
+              --command-config /scripts/client.properties \
+              --topic $topic 2>/dev/null | \
+              awk -F: '{sum+=$3} END {print "  总消息数: " (sum ? sum : 0)}'
+            
+            # 显示最近的消息（如果有）
+            if [[ -f "/tmp/kafka-logs/${topic}.log" ]]; then
+                recent_count=$(tail -n 10 /tmp/kafka-logs/${topic}.log | wc -l)
+                echo "  最近消息: $recent_count 条"
+                if [[ $recent_count -gt 0 ]]; then
+                    echo "  最新消息预览:"
+                    tail -n 2 /tmp/kafka-logs/${topic}.log | head -n 1 | cut -c1-100
+                    echo "..."
+                fi
+            fi
+            echo "---"
+        done
+        
+        echo "按 Ctrl+C 退出监控"
+        sleep 5
+    done
+
+  client.properties: |
+    security.protocol=SSL
+    ssl.keystore.location=/etc/kafka-ssl/kafka.server.keystore.jks
+    ssl.keystore.password=password123
+    ssl.key.password=password123
+    ssl.truststore.location=/etc/kafka-ssl/kafka.server.truststore.jks
+    ssl.truststore.password=password123
+    ssl.endpoint.identification.algorithm=
+
+  test-connection.sh: |
+    #!/bin/bash
+    echo "🔍 测试 Kafka mTLS 连接..."
+    
+    echo "1. 检查证书文件:"
+    ls -la /etc/kafka-ssl/
+    echo
+    
+    echo "2. 测试连接到 Kafka brokers:"
+    kafka-broker-api-versions \
+      --bootstrap-server $KAFKA_BOOTSTRAP_SERVERS \
+      --command-config /scripts/client.properties
+    
+    echo
+    echo "3. 列出现有 topics:"
+    kafka-topics --bootstrap-server $KAFKA_BOOTSTRAP_SERVERS \
+      --command-config /scripts/client.properties \
+      --list 
