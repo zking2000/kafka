@@ -1,0 +1,8 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opentelemetry
+  labels:
+    name: opentelemetry
+    purpose: telemetry-collection 

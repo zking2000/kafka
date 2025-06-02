@@ -1,0 +1,400 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opentelemetry-collector
+  namespace: opentelemetry
+  labels:
+    app: opentelemetry-collector
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opentelemetry-collector
+  labels:
+    app: opentelemetry-collector
+rules:
+- apiGroups: [""]
+  resources: ["pods", "namespaces", "nodes", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions"]
+  resources: ["replicasets"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opentelemetry-collector
+  labels:
+    app: opentelemetry-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opentelemetry-collector
+subjects:
+- kind: ServiceAccount
+  name: opentelemetry-collector
+  namespace: opentelemetry
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opentelemetry-collector-config
+  namespace: opentelemetry
+  labels:
+    app: opentelemetry-collector
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      
+      # 收集 Kubernetes 容器日志
+      filelog:
+        include:
+          - /var/log/pods/*/*/*.log
+        exclude:
+          - /var/log/pods/*/otc-container/*.log
+        include_file_name: false
+        include_file_path: true
+        operators:
+          - type: json_parser
+            id: parser-docker
+            output: extract_metadata_from_filepath
+            timestamp:
+              parse_from: attributes.time
+              layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+          - type: regex_parser
+            id: extract_metadata_from_filepath
+            regex: '^.*\/(?P<namespace>[^_]+)_(?P<pod_name>[^_]+)_(?P<uid>[a-f0-9\-]+)\/(?P<container_name>[^\._]+)\/(?P<restart_count>\d+)\.log$'
+            parse_from: attributes["log.file.path"]
+            output: add_attributes
+          - type: add
+            id: add_attributes
+            field: attributes.k8s.namespace.name
+            value: EXPR(attributes.namespace)
+          - type: add
+            field: attributes.k8s.pod.name
+            value: EXPR(attributes.pod_name)
+          - type: add
+            field: attributes.k8s.container.name
+            value: EXPR(attributes.container_name)
+
+      # 收集主机指标
+      hostmetrics:
+        collection_interval: 30s
+        scrapers:
+          cpu:
+          memory:
+          disk:
+          filesystem:
+          network:
+          load:
+
+      # 收集 Kubernetes 指标
+      k8s_cluster:
+        collection_interval: 30s
+
+    processors:
+      # 批处理处理器
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+      
+      # 资源处理器 - 添加 Kubernetes 元数据
+      resource:
+        attributes:
+          - key: k8s.cluster.name
+            value: "kafka-cluster"
+            action: upsert
+          - key: environment
+            value: "production"
+            action: upsert
+      
+      # 内存限制处理器
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    exporters:
+      # Debug exporter for troubleshooting
+      debug:
+        verbosity: detailed
+      
+      # Kafka exporter for logs - Cloud DNS 配置
+      kafka/logs:
+        protocol_version: 2.6.0
+        # 选择适合您环境的broker地址配置
+        # 选项1: 使用 Cloud DNS
+        brokers:
+          - kafka-0.kafka.internal.cloud:9093
+          - kafka-1.kafka.internal.cloud:9093
+          - kafka-2.kafka.internal.cloud:9093
+        
+        # 选项2: 使用 LoadBalancer 外部IP
+        # brokers:
+        #   - 10.0.0.36:9094
+        #   - 10.0.0.37:9094
+        #   - 10.0.0.38:9094
+        
+        topic: otcol_logs
+        encoding: otlp_proto
+        producer:
+          max_message_bytes: 10000000
+          required_acks: 1
+          compression: gzip
+        tls:
+          cert_file: /etc/ssl/certs/client-cert.pem
+          key_file: /etc/ssl/private/client-key.pem
+          ca_file: /etc/ssl/certs/ca-cert.pem
+          server_name_override: "kafka.internal.cloud"
+          insecure_skip_verify: true
+
+      # Kafka exporter for traces - Cloud DNS 配置
+      kafka/traces:
+        protocol_version: 2.6.0
+        # 选择适合您环境的broker地址配置
+        # 选项1: 使用 Cloud DNS
+        brokers:
+          - kafka-0.kafka.internal.cloud:9093
+          - kafka-1.kafka.internal.cloud:9093
+          - kafka-2.kafka.internal.cloud:9093
+        
+        # 选项2: 使用 LoadBalancer 外部IP
+        # brokers:
+        #   - 10.0.0.36:9094
+        #   - 10.0.0.37:9094
+        #   - 10.0.0.38:9094
+        
+        topic: otcol_traces
+        encoding: otlp_proto
+        producer:
+          max_message_bytes: 10000000
+          required_acks: 1
+          compression: gzip
+        tls:
+          cert_file: /etc/ssl/certs/client-cert.pem
+          key_file: /etc/ssl/private/client-key.pem
+          ca_file: /etc/ssl/certs/ca-cert.pem
+          server_name_override: "kafka.internal.cloud"
+          insecure_skip_verify: true
+
+      # Kafka exporter for metrics - Cloud DNS 配置
+      kafka/metrics:
+        protocol_version: 2.6.0
+        # 选择适合您环境的broker地址配置
+        # 选项1: 使用 Cloud DNS
+        brokers:
+          - kafka-0.kafka.internal.cloud:9093
+          - kafka-1.kafka.internal.cloud:9093
+          - kafka-2.kafka.internal.cloud:9093
+        
+        # 选项2: 使用 LoadBalancer 外部IP
+        # brokers:
+        #   - 10.0.0.36:9094
+        #   - 10.0.0.37:9094
+        #   - 10.0.0.38:9094
+        
+        topic: otcol_metrics
+        encoding: otlp_proto
+        producer:
+          max_message_bytes: 10000000
+          required_acks: 1
+          compression: gzip
+        tls:
+          cert_file: /etc/ssl/certs/client-cert.pem
+          key_file: /etc/ssl/private/client-key.pem
+          ca_file: /etc/ssl/certs/ca-cert.pem
+          server_name_override: "kafka.internal.cloud"
+          insecure_skip_verify: true
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        logs:
+          receivers: [otlp, filelog]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug, kafka/logs]
+        
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug, kafka/traces]
+        
+        metrics:
+          receivers: [otlp, hostmetrics, k8s_cluster]
+          processors: [memory_limiter, resource, batch]
+          exporters: [debug, kafka/metrics]
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: opentelemetry-collector
+  namespace: opentelemetry
+  labels:
+    app: opentelemetry-collector
+spec:
+  selector:
+    matchLabels:
+      app: opentelemetry-collector
+  template:
+    metadata:
+      labels:
+        app: opentelemetry-collector
+    spec:
+      serviceAccountName: opentelemetry-collector
+      # 添加 DNS 配置以支持 cloud DNS 解析
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "2"
+        - name: edns0
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:0.127.0
+        command:
+          - "/otelcol-contrib"
+          - "--config=/conf/otel-collector-config.yaml"
+        ports:
+        - containerPort: 13133   # OTLP Health Check
+          protocol: TCP
+        - containerPort: 4317   # OTLP gRPC receiver
+          protocol: TCP
+        - containerPort: 4318   # OTLP HTTP receiver
+          protocol: TCP
+        - containerPort: 8888   # Prometheus metrics
+          protocol: TCP
+        - containerPort: 8889   # Prometheus exporter metrics
+          protocol: TCP
+        env:
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: K8S_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        volumeMounts:
+        - name: otel-collector-config-vol
+          mountPath: /conf
+        - name: varlogpods
+          mountPath: /var/log/pods
+          readOnly: true
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+        - name: ssl-certs
+          mountPath: /etc/ssl/certs
+          readOnly: true
+        - name: ssl-private
+          mountPath: /etc/ssl/private
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: otel-collector-config-vol
+        configMap:
+          name: opentelemetry-collector-config
+          items:
+          - key: otel-collector-config.yaml
+            path: otel-collector-config.yaml
+      - name: varlogpods
+        hostPath:
+          path: /var/log/pods
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+      - name: ssl-certs
+        secret:
+          secretName: kafka-client-certs
+          items:
+          - key: ca.crt
+            path: ca-cert.pem
+          - key: tls.crt
+            path: client-cert.pem
+      - name: ssl-private
+        secret:
+          secretName: kafka-client-certs
+          items:
+          - key: tls.key
+            path: client-key.pem
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      hostNetwork: false
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opentelemetry-collector
+  namespace: opentelemetry
+  labels:
+    app: opentelemetry-collector
+spec:
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    protocol: TCP
+    targetPort: 4317
+  - name: otlp-health-check
+    port: 13133
+    protocol: TCP
+    targetPort: 13133
+  - name: otlp-http
+    port: 4318
+    protocol: TCP
+    targetPort: 4318
+  - name: metrics
+    port: 8888
+    protocol: TCP
+    targetPort: 8888
+  selector:
+    app: opentelemetry-collector
+  type: ClusterIP 
