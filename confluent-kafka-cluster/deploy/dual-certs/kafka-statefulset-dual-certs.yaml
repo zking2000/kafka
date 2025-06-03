@@ -1,0 +1,409 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    component: kafka-broker
+spec:
+  serviceName: kafka-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+        component: kafka-broker
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      initContainers:
+      - name: create-ssl-creds
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          # 复制原始证书文件到可写目录
+          cp /etc/kafka/secrets-ro/* /etc/kafka/secrets/
+          
+          # 创建server凭据文件
+          echo "$SERVER_KEYSTORE_PASSWORD" > /etc/kafka/secrets/server_keystore_creds
+          echo "$SERVER_KEY_PASSWORD" > /etc/kafka/secrets/server_key_creds
+          
+          # 创建client凭据文件
+          echo "$CLIENT_KEYSTORE_PASSWORD" > /etc/kafka/secrets/client_keystore_creds
+          echo "$CLIENT_KEY_PASSWORD" > /etc/kafka/secrets/client_key_creds
+          
+          # 创建truststore凭据文件
+          echo "$TRUSTSTORE_PASSWORD" > /etc/kafka/secrets/truststore_creds
+          
+          # 为了向后兼容，也创建旧的凭据文件（使用server证书）
+          echo "$SERVER_KEYSTORE_PASSWORD" > /etc/kafka/secrets/keystore_creds
+          echo "$SERVER_KEY_PASSWORD" > /etc/kafka/secrets/key_creds
+          
+          chmod 600 /etc/kafka/secrets/*_creds
+          chown 1000:1000 /etc/kafka/secrets/*
+        env:
+        # Server证书密码
+        - name: SERVER_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.keystore.password
+        - name: SERVER_KEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.key.password
+        
+        # Client证书密码
+        - name: CLIENT_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: client.keystore.password
+        - name: CLIENT_KEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: client.key.password
+        
+        # Truststore密码
+        - name: TRUSTSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: truststore.password
+        volumeMounts:
+        - name: kafka-secrets-ro
+          mountPath: /etc/kafka/secrets-ro
+          readOnly: true
+        - name: ssl-creds
+          mountPath: /etc/kafka/secrets
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:7.6.0
+        ports:
+        - containerPort: 9092
+          name: internal-ssl
+        - containerPort: 9093
+          name: external-ssl
+        - containerPort: 9094
+          name: controller
+        - containerPort: 9095
+          name: kraft-api
+        - containerPort: 9999
+          name: jmx
+        resources:
+          requests:
+            memory: "3Gi"
+            cpu: "1000m"
+          limits:
+            memory: "6Gi"
+            cpu: "2000m"
+        env:
+        # KRaft配置
+        - name: KAFKA_PROCESS_ROLES
+          value: "broker,controller"
+        - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+          value: "0@kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9094,1@kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9094,2@kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9094"
+        - name: KAFKA_CONTROLLER_LISTENER_NAMES
+          value: "CONTROLLER"
+        - name: KAFKA_CLUSTER_ID
+          value: "MkU3OEVBNTcwNTJENDM2Qk"
+        - name: CLUSTER_ID
+          value: "MkU3OEVBNTcwNTJENDM2Qk"
+        
+        # 监听器配置
+        - name: KAFKA_LISTENERS
+          value: "INTERNAL_SSL://0.0.0.0:9092,EXTERNAL_SSL://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094,KRAFT_API://0.0.0.0:9095"
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: "INTERNAL_SSL:SSL,EXTERNAL_SSL:SSL,CONTROLLER:SSL,KRAFT_API:PLAINTEXT"
+        - name: KAFKA_INTER_BROKER_LISTENER_NAME
+          value: "INTERNAL_SSL"
+        
+        # 全局SSL配置（使用server证书）
+        - name: KAFKA_SSL_KEYSTORE_FILENAME
+          value: "kafka.server.keystore.jks"
+        - name: KAFKA_SSL_KEYSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.server.keystore.jks"
+        - name: KAFKA_SSL_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.keystore.password
+        - name: KAFKA_SSL_KEYSTORE_CREDENTIALS
+          value: "server_keystore_creds"
+        - name: KAFKA_SSL_KEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.key.password
+        - name: KAFKA_SSL_KEY_CREDENTIALS
+          value: "server_key_creds"
+        - name: KAFKA_SSL_TRUSTSTORE_FILENAME
+          value: "kafka.truststore.jks"
+        - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.truststore.jks"
+        - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: truststore.password
+        - name: KAFKA_SSL_TRUSTSTORE_CREDENTIALS
+          value: "truststore_creds"
+        - name: KAFKA_SSL_CLIENT_AUTH
+          value: "required"
+        - name: KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
+          value: ""
+        
+        # INTERNAL_SSL监听器特定SSL配置（server证书）
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_KEYSTORE_FILENAME
+          value: "kafka.server.keystore.jks"
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_KEYSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.server.keystore.jks"
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.keystore.password
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_KEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.key.password
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_TRUSTSTORE_FILENAME
+          value: "kafka.truststore.jks"
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_TRUSTSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.truststore.jks"
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_TRUSTSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: truststore.password
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_CLIENT_AUTH
+          value: "required"
+        - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
+          value: ""
+        
+        # EXTERNAL_SSL监听器特定SSL配置（server证书）
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_KEYSTORE_FILENAME
+          value: "kafka.server.keystore.jks"
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_KEYSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.server.keystore.jks"
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.keystore.password
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_KEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.key.password
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_TRUSTSTORE_FILENAME
+          value: "kafka.truststore.jks"
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_TRUSTSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.truststore.jks"
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_TRUSTSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: truststore.password
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_CLIENT_AUTH
+          value: "required"
+        - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
+          value: ""
+        
+        # CONTROLLER监听器特定SSL配置（server证书）
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_KEYSTORE_FILENAME
+          value: "kafka.server.keystore.jks"
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_KEYSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.server.keystore.jks"
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.keystore.password
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_KEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: server.key.password
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_TRUSTSTORE_FILENAME
+          value: "kafka.truststore.jks"
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_TRUSTSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.truststore.jks"
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_TRUSTSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: truststore.password
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_CLIENT_AUTH
+          value: "required"
+        - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
+          value: ""
+        
+        # 其他配置保持不变...
+        - name: KAFKA_LOG_DIRS
+          value: "/var/lib/kafka/data"
+        - name: KAFKA_METADATA_LOG_DIR
+          value: "/var/lib/kafka/metadata"
+        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_MIN_INSYNC_REPLICAS
+          value: "2"
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+          value: "2"
+        - name: KAFKA_NUM_PARTITIONS
+          value: "3"
+        - name: KAFKA_NUM_NETWORK_THREADS
+          value: "3"
+        - name: KAFKA_NUM_IO_THREADS
+          value: "8"
+        - name: KAFKA_SOCKET_SEND_BUFFER_BYTES
+          value: "102400"
+        - name: KAFKA_SOCKET_RECEIVE_BUFFER_BYTES
+          value: "102400"
+        - name: KAFKA_SOCKET_REQUEST_MAX_BYTES
+          value: "104857600"
+        - name: KAFKA_NUM_RECOVERY_THREADS_PER_DATA_DIR
+          value: "1"
+        - name: KAFKA_LOG_RETENTION_HOURS
+          value: "168"
+        - name: KAFKA_LOG_SEGMENT_BYTES
+          value: "1073741824"
+        - name: KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS
+          value: "300000"
+        - name: KAFKA_LOG_CLEANUP_POLICY
+          value: "delete"
+        - name: JMX_PORT
+          value: "9999"
+        - name: JMX_HOSTNAME
+          value: "localhost"
+        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+          value: "false"
+        - name: KAFKA_DELETE_TOPIC_ENABLE
+          value: "true"
+        - name: KAFKA_LOG4J_ROOT_LOGLEVEL
+          value: "INFO"
+        - name: KAFKA_LOG4J_LOGGERS
+          value: "kafka.controller=INFO,kafka.coordinator.group=INFO,kafka.coordinator.transaction=INFO,kafka.server.KafkaApis=INFO"
+        - name: KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE
+          value: "false"
+        - name: KAFKA_CONFLUENT_SUPPORT_CUSTOMER_ID
+          value: "anonymous"
+        - name: KAFKA_PORT
+          value: ""
+        - name: KAFKA_HOST_NAME
+          value: ""
+        
+        # 动态变量
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        
+        command:
+        - sh
+        - -c
+        - |
+          # 清理数据目录中的lost+found目录
+          if [ -d "/var/lib/kafka/data/lost+found" ]; then
+            echo "Removing lost+found directory from Kafka data directory"
+            rm -rf /var/lib/kafka/data/lost+found
+          fi
+          
+          if [ -d "/var/lib/kafka/metadata/lost+found" ]; then
+            echo "Removing lost+found directory from Kafka metadata directory"
+            rm -rf /var/lib/kafka/metadata/lost+found
+          fi
+          
+          # 从POD名称提取节点ID (如 kafka-0 -> 0)
+          export KAFKA_NODE_ID=${POD_NAME##*-}
+          
+          # 动态设置 ADVERTISED_LISTENERS
+          export KAFKA_ADVERTISED_LISTENERS="INTERNAL_SSL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9092,EXTERNAL_SSL://${POD_NAME}-external.confluent-kafka.svc.cluster.local:9093,KRAFT_API://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9095"
+          
+          echo "Starting Kafka with NODE_ID: $KAFKA_NODE_ID"
+          echo "ADVERTISED_LISTENERS: $KAFKA_ADVERTISED_LISTENERS"
+          exec /etc/confluent/docker/run
+        
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /var/lib/kafka/data
+        - name: kafka-metadata
+          mountPath: /var/lib/kafka/metadata
+        - name: ssl-creds
+          mountPath: /etc/kafka/secrets
+          readOnly: true
+        - name: kafka-client-config
+          mountPath: /etc/kafka/client-config
+          readOnly: true
+        
+        livenessProbe:
+          tcpSocket:
+            port: 9092
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - |
+              # 检查Kafka进程是否运行和端口是否可连接
+              pgrep -f "kafka.server.KafkaRaftServer" > /dev/null && \
+              nc -z localhost 9092 && \
+              nc -z localhost 9094 && \
+              nc -z localhost 9095
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+      
+      volumes:
+      - name: kafka-secrets-ro
+        secret:
+          secretName: kafka-ssl-certs
+      - name: ssl-creds
+        emptyDir: {}
+      - name: kafka-client-config
+        configMap:
+          name: kafka-client-config
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: kafka-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "standard-rwo"
+      resources:
+        requests:
+          storage: 100Gi
+  - metadata:
+      name: kafka-metadata
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "standard-rwo"
+      resources:
+        requests:
+          storage: 10Gi 
