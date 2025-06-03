@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-client-config
+  namespace: confluent-kafka
+  labels:
+    app: kafka
+    component: kafka-client
+data:
+  # 客户端配置（使用client证书）
+  client.properties: |
+    # Kafka客户端mTLS配置（使用专用的client证书）
+    security.protocol=SSL
+    ssl.keystore.location=/etc/kafka/secrets/kafka.client.keystore.jks
+    ssl.keystore.password=${CLIENT_KEYSTORE_PASSWORD}
+    ssl.key.password=${CLIENT_KEY_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
+    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.endpoint.identification.algorithm=
+    ssl.client.auth=required
+    
+    # 连接配置
+    bootstrap.servers=kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9092,kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9092,kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9092
+    
+    # 生产者配置
+    producer.acks=all
+    producer.retries=2147483647
+    producer.max.in.flight.requests.per.connection=5
+    producer.enable.idempotence=true
+    producer.compression.type=snappy
+    producer.batch.size=16384
+    producer.linger.ms=5
+    producer.buffer.memory=33554432
+    
+    # 消费者配置
+    consumer.auto.offset.reset=earliest
+    consumer.enable.auto.commit=false
+    consumer.isolation.level=read_committed
+    consumer.max.poll.records=500
+    consumer.session.timeout.ms=30000
+    consumer.heartbeat.interval.ms=3000
+  
+  # 管理客户端配置（使用client证书）
+  admin.properties: |
+    # Kafka管理客户端mTLS配置（使用专用的client证书）
+    security.protocol=SSL
+    ssl.keystore.location=/etc/kafka/secrets/kafka.client.keystore.jks
+    ssl.keystore.password=${CLIENT_KEYSTORE_PASSWORD}
+    ssl.key.password=${CLIENT_KEY_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
+    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.endpoint.identification.algorithm=
+    ssl.client.auth=required
+    
+    # 管理连接配置
+    bootstrap.servers=kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9092,kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9092,kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9092
+    
+    # 超时配置
+    request.timeout.ms=30000
+    connections.max.idle.ms=540000
+  
+  # 消费者专用配置（使用client证书）
+  consumer.properties: |
+    # Kafka消费者专用mTLS配置（使用专用的client证书）
+    security.protocol=SSL
+    ssl.keystore.location=/etc/kafka/secrets/kafka.client.keystore.jks
+    ssl.keystore.password=${CLIENT_KEYSTORE_PASSWORD}
+    ssl.key.password=${CLIENT_KEY_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
+    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.endpoint.identification.algorithm=
+    ssl.client.auth=required
+    
+    # 消费者连接配置
+    bootstrap.servers=kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9092,kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9092,kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9092
+    group.id=default-consumer-group
+    
+    # 消费者行为配置
+    auto.offset.reset=earliest
+    enable.auto.commit=false
+    isolation.level=read_committed
+    max.poll.records=500
+    session.timeout.ms=30000
+    heartbeat.interval.ms=3000
+    max.poll.interval.ms=300000
+    fetch.min.bytes=1
+    fetch.max.bytes=52428800
+    fetch.max.wait.ms=500
+  
+  # 生产者专用配置（使用client证书）
+  producer.properties: |
+    # Kafka生产者专用mTLS配置（使用专用的client证书）
+    security.protocol=SSL
+    ssl.keystore.location=/etc/kafka/secrets/kafka.client.keystore.jks
+    ssl.keystore.password=${CLIENT_KEYSTORE_PASSWORD}
+    ssl.key.password=${CLIENT_KEY_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
+    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.endpoint.identification.algorithm=
+    ssl.client.auth=required
+    
+    # 生产者连接配置
+    bootstrap.servers=kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9092,kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9092,kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9092
+    
+    # 生产者行为配置
+    acks=all
+    retries=2147483647
+    max.in.flight.requests.per.connection=5
+    enable.idempotence=true
+    compression.type=snappy
+    batch.size=16384
+    linger.ms=5
+    buffer.memory=33554432
+    max.request.size=1048576
+    delivery.timeout.ms=120000
+    request.timeout.ms=30000
+
+  # 向后兼容配置（使用server证书，用于内部Kafka工具）
+  internal.properties: |
+    # 内部工具使用server证书（向后兼容）
+    security.protocol=SSL
+    ssl.keystore.location=/etc/kafka/secrets/kafka.server.keystore.jks
+    ssl.keystore.password=${SERVER_KEYSTORE_PASSWORD}
+    ssl.key.password=${SERVER_KEY_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
+    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.endpoint.identification.algorithm=
+    ssl.client.auth=required
+    bootstrap.servers=localhost:9092 
