@@ -1,0 +1,37 @@
+---
+# Ansible主机清单配置
+# 请根据实际环境修改IP地址和连接信息
+
+all:
+  children:
+    haproxy_servers:
+      hosts:
+        haproxy-vm-1:
+          ansible_host: "192.168.1.100"  # 请替换为实际的VM IP地址
+          ansible_user: "ubuntu"         # 请替换为实际的用户名
+          ansible_ssh_private_key_file: "~/.ssh/id_rsa"  # 请替换为实际的SSH密钥路径
+          ansible_python_interpreter: "/usr/bin/python3"
+        # 如果有多个HAProxy服务器，可以添加更多主机
+        # haproxy-vm-2:
+        #   ansible_host: "192.168.1.101"
+        #   ansible_user: "ubuntu"
+        #   ansible_ssh_private_key_file: "~/.ssh/id_rsa"
+        #   ansible_python_interpreter: "/usr/bin/python3"
+      vars:
+        # HAProxy相关变量
+        haproxy_version: "2.8.*"
+        haproxy_config_path: "/etc/haproxy/haproxy.cfg"
+        haproxy_service_name: "haproxy"
+        
+        # Kafka集群配置
+        kafka_brokers:
+          - { name: "kafka-0", ip: "10.0.0.31", port: "9094", frontend_port: "19094" }
+          - { name: "kafka-1", ip: "10.0.0.30", port: "9094", frontend_port: "29094" }
+          - { name: "kafka-2", ip: "10.0.0.32", port: "9094", frontend_port: "39094" }
+
+# 全局变量
+all:
+  vars:
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+    ansible_become: true
+    ansible_become_method: sudo 
