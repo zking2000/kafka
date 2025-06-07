@@ -1,0 +1,133 @@
+---
+- name: 安装和配置HAProxy
+  hosts: haproxy_servers
+  become: yes
+  vars:
+    haproxy_version: "2.8.*"
+    haproxy_config_path: "/etc/haproxy/haproxy.cfg"
+    haproxy_service_name: "haproxy"
+    kafka_brokers:
+      - { name: "kafka-0", ip: "10.0.0.31", port: "9094", frontend_port: "19094" }
+      - { name: "kafka-1", ip: "10.0.0.30", port: "9094", frontend_port: "29094" }
+      - { name: "kafka-2", ip: "10.0.0.32", port: "9094", frontend_port: "39094" }
+
+  tasks:
+    - name: 更新包管理器缓存 (Ubuntu/Debian)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: 更新包管理器缓存 (CentOS/RHEL)
+      yum:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: 安装HAProxy (Ubuntu/Debian)
+      apt:
+        name: haproxy={{ haproxy_version }}
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: 安装HAProxy (CentOS/RHEL)
+      yum:
+        name: haproxy
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: 创建haproxy用户
+      user:
+        name: haproxy
+        system: yes
+        shell: /bin/false
+        home: /var/lib/haproxy
+        create_home: no
+
+    - name: 备份原始HAProxy配置文件
+      copy:
+        src: "{{ haproxy_config_path }}"
+        dest: "{{ haproxy_config_path }}.backup"
+        remote_src: yes
+        backup: yes
+      ignore_errors: yes
+
+    - name: 创建HAProxy配置文件
+      template:
+        src: haproxy.cfg.j2
+        dest: "{{ haproxy_config_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      notify:
+        - restart haproxy
+        - validate haproxy config
+
+    - name: 启用并启动HAProxy服务
+      systemd:
+        name: "{{ haproxy_service_name }}"
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: 检查HAProxy服务状态
+      systemd:
+        name: "{{ haproxy_service_name }}"
+      register: haproxy_status
+
+    - name: 显示HAProxy服务状态
+      debug:
+        msg: "HAProxy服务状态: {{ haproxy_status.status.ActiveState }}"
+
+    - name: 打开防火墙端口 (Ubuntu/Debian)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "80"
+        - "19094"
+        - "29094"
+        - "39094"
+      when: ansible_os_family == "Debian"
+      ignore_errors: yes
+
+    - name: 打开防火墙端口 (CentOS/RHEL)
+      firewalld:
+        port: "{{ item }}/tcp"
+        permanent: yes
+        state: enabled
+      loop:
+        - "80"
+        - "19094"
+        - "29094"
+        - "39094"
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+      notify: reload firewalld
+
+    - name: 验证HAProxy配置语法
+      command: haproxy -c -f {{ haproxy_config_path }}
+      register: config_check
+      changed_when: false
+
+    - name: 显示配置验证结果
+      debug:
+        msg: "HAProxy配置验证: {{ config_check.stdout }}"
+
+  handlers:
+    - name: restart haproxy
+      systemd:
+        name: "{{ haproxy_service_name }}"
+        state: restarted
+
+    - name: validate haproxy config
+      command: haproxy -c -f {{ haproxy_config_path }}
+      register: config_validation
+      failed_when: config_validation.rc != 0
+
+    - name: reload firewalld
+      systemd:
+        name: firewalld
+        state: reloaded
+      when: ansible_os_family == "RedHat" 
