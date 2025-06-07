@@ -1,0 +1,58 @@
+# HAProxy配置文件 - 由Ansible自动生成
+# 生成时间: {{ ansible_date_time.iso8601 }}
+# 目标主机: {{ inventory_hostname }}
+
+global
+    daemon
+    user haproxy
+    group haproxy
+    log stdout local0 info
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+    stats timeout 30s
+
+defaults
+    mode tcp
+    log global
+    option dontlognull
+    timeout connect 5000ms
+    timeout client 50000ms
+    timeout server 50000ms
+    errorfile 400 /etc/haproxy/errors/400.http
+    errorfile 403 /etc/haproxy/errors/403.http
+    errorfile 408 /etc/haproxy/errors/408.http
+    errorfile 500 /etc/haproxy/errors/500.http
+    errorfile 502 /etc/haproxy/errors/502.http
+    errorfile 503 /etc/haproxy/errors/503.http
+    errorfile 504 /etc/haproxy/errors/504.http
+
+# 健康检查端点
+frontend health_check
+    bind *:80
+    mode http
+    default_backend health_backend
+
+backend health_backend
+    mode http
+    http-request return status 200 content-type text/plain lf-string "Kafka-Proxy-OK"
+
+# HAProxy统计页面
+frontend stats
+    bind *:8404
+    mode http
+    stats enable
+    stats uri /stats
+    stats refresh 30s
+    stats admin if TRUE
+
+# Kafka mTLS端口配置
+{% for broker in kafka_brokers %}
+frontend kafka_{{ loop.index0 }}_9094
+    bind *:{{ broker.frontend_port }}
+    default_backend kafka_{{ loop.index0 }}_9094_backend
+
+backend kafka_{{ loop.index0 }}_9094_backend
+    balance roundrobin
+    option tcp-check
+    server {{ broker.name }} {{ broker.ip }}:{{ broker.port }} check inter 5000ms downinter 5000ms rise 2 fall 3
+{% endfor %} 
