@@ -1,0 +1,51 @@
+---
+- name: 测试与目标主机的连接
+  hosts: haproxy_servers
+  gather_facts: yes
+  
+  tasks:
+    - name: 检查主机连接性
+      ping:
+      
+    - name: 收集系统信息
+      setup:
+      
+    - name: 显示系统基本信息
+      debug:
+        msg: |
+          主机名: {{ inventory_hostname }}
+          IP地址: {{ ansible_default_ipv4.address }}
+          操作系统: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          内核版本: {{ ansible_kernel }}
+          架构: {{ ansible_architecture }}
+          内存总量: {{ ansible_memtotal_mb }}MB
+          
+    - name: 检查必要的端口是否被占用
+      wait_for:
+        port: "{{ item }}"
+        host: "{{ ansible_default_ipv4.address }}"
+        timeout: 5
+        state: started
+      ignore_errors: yes
+      register: port_check
+      loop:
+        - 80
+        - 8404
+        - 19094
+        - 29094
+        - 39094
+        
+    - name: 显示端口检查结果
+      debug:
+        msg: "端口 {{ item.item }} 状态: {% if item.failed %}未占用{% else %}已占用{% endif %}"
+      loop: "{{ port_check.results }}"
+      
+    - name: 检查是否已安装HAProxy
+      command: which haproxy
+      register: haproxy_installed
+      ignore_errors: yes
+      changed_when: false
+      
+    - name: 显示HAProxy安装状态
+      debug:
+        msg: "HAProxy状态: {% if haproxy_installed.rc == 0 %}已安装 ({{ haproxy_installed.stdout }}){% else %}未安装{% endif %}" 
