@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: collector
+data:
+  config.yaml: |
+    receivers:
+      # Kafka接收器 - 日志
+      kafka/logs:
+        protocol_version: 2.6.0
+        brokers:
+          - kafka-broker-1:9093
+          - kafka-broker-2:9093
+          - kafka-broker-3:9093
+        topic: otcol_logs
+        group_id: otel-collector-logs
+        client_id: otel-collector-logs
+        auth:
+          tls:
+            cert_file: /etc/ssl/certs/client.crt
+            key_file: /etc/ssl/private/client.key
+            ca_file: /etc/ssl/certs/ca.crt
+            insecure: false
+        encoding: otlp_proto
+        
+      # Kafka接收器 - 指标
+      kafka/metrics:
+        protocol_version: 2.6.0
+        brokers:
+          - kafka-broker-1:9093
+          - kafka-broker-2:9093
+          - kafka-broker-3:9093
+        topic: otcol_metrics
+        group_id: otel-collector-metrics
+        client_id: otel-collector-metrics
+        auth:
+          tls:
+            cert_file: /etc/ssl/certs/client.crt
+            key_file: /etc/ssl/private/client.key
+            ca_file: /etc/ssl/certs/ca.crt
+            insecure: false
+        encoding: otlp_proto
+        
+      # Kafka接收器 - 链路追踪
+      kafka/traces:
+        protocol_version: 2.6.0
+        brokers:
+          - kafka-broker-1:9093
+          - kafka-broker-2:9093
+          - kafka-broker-3:9093
+        topic: otcol_traces
+        group_id: otel-collector-traces
+        client_id: otel-collector-traces
+        auth:
+          tls:
+            cert_file: /etc/ssl/certs/client.crt
+            key_file: /etc/ssl/private/client.key
+            ca_file: /etc/ssl/certs/ca.crt
+            insecure: false
+        encoding: otlp_proto
+
+      # OTLP接收器（用于健康检查和内部指标）
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      # 批处理器
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+        
+      # 内存限制器
+      memory_limiter:
+        limit_mib: 512
+        spike_limit_mib: 128
+        
+      # 资源处理器
+      resource:
+        attributes:
+          - key: service.name
+            value: otel-collector
+            action: upsert
+          - key: service.version
+            value: "1.0.0"
+            action: upsert
+
+    exporters:
+      # Loki导出器 - 日志
+      loki:
+        endpoint: http://loki:3100/loki/api/v1/push
+        tenant_id: "default"
+        headers:
+          "X-Scope-OrgID": "default"
+        
+      # Prometheus Remote Write导出器 - 指标到Mimir
+      prometheusremotewrite:
+        endpoint: http://mimir:9009/api/v1/push
+        headers:
+          "X-Scope-OrgID": "default"
+        tls:
+          insecure: true
+          
+      # Jaeger导出器 - 链路追踪到Tempo
+      otlp/tempo:
+        endpoint: http://tempo:4317
+        tls:
+          insecure: true
+        headers:
+          "X-Scope-OrgID": "default"
+
+      # 调试导出器
+      debug:
+        verbosity: basic
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      pprof:
+        endpoint: 0.0.0.0:1777
+      zpages:
+        endpoint: 0.0.0.0:55679
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        logs:
+          receivers: [kafka/logs]
+          processors: [memory_limiter, resource, batch]
+          exporters: [loki, debug]
+          
+        metrics:
+          receivers: [kafka/metrics]
+          processors: [memory_limiter, resource, batch]
+          exporters: [prometheusremotewrite, debug]
+          
+        traces:
+          receivers: [kafka/traces]
+          processors: [memory_limiter, resource, batch]
+          exporters: [otlp/tempo, debug]
+
+      telemetry:
+        logs:
+          level: "info"
+        metrics:
+          address: 0.0.0.0:8888 
