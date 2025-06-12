@@ -1,0 +1,75 @@
+---
+- name: Git推送备份文件到GitHub (Ansible Tower优化版)
+  hosts: localhost
+  gather_facts: yes
+  connection: local
+  become: no
+  
+  vars:
+    # Tower中配置的项目路径
+    project_path: "{{ tower_project_path | default('/tmp/tower-projects') }}"
+    backup_source_path: "/tmp/extracted"
+    timestamp: "{{ ansible_date_time.epoch }}"
+    
+  pre_tasks:
+    - name: 验证必要变量是否已定义
+      assert:
+        that:
+          - github_repo is defined
+          - github_token is defined
+          - git_user_name is defined
+          - git_user_email is defined
+        fail_msg: "必要的变量未定义，请在Tower中配置: github_repo, github_token, git_user_name, git_user_email"
+
+    - name: 显示Git推送任务开始信息
+      debug:
+        msg: |
+          🔄 开始Git推送任务
+          - GitHub仓库: {{ github_repo }}
+          - 源路径: {{ backup_source_path }}
+          - 项目路径: {{ project_path }}
+
+  tasks:
+    - name: 检查备份源目录是否存在
+      stat:
+        path: "{{ backup_source_path }}"
+      register: source_stat
+
+    - name: 确保备份源目录存在
+      assert:
+        that:
+          - source_stat.stat.exists
+          - source_stat.stat.isdir
+        fail_msg: "备份源目录不存在: {{ backup_source_path }}"
+
+    - name: 扫描所有主机备份目录
+      find:
+        paths: "{{ backup_source_path }}"
+        file_type: directory
+        depth: 1
+      register: host_dirs
+
+    - name: 显示发现的主机备份
+      debug:
+        msg: |
+          📁 发现的主机备份:
+          {% for dir in host_dirs.files %}
+          - {{ dir.path | basename }}
+          {% endfor %}
+
+    - name: 处理每个主机的备份文件
+      include_tasks: tasks/process-host-backup.yml
+      vars:
+        host_name: "{{ item.path | basename }}"
+        host_backup_path: "{{ item.path }}"
+      loop: "{{ host_dirs.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+  handlers:
+    - name: 清理工作目录
+      file:
+        path: "{{ project_path }}/{{ github_repo.split('/')[-1] }}"
+        state: absent
+      listen: "cleanup git workspace"
+      ignore_errors: yes 
