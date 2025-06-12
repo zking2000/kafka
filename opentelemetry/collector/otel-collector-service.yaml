@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: collector
+  labels:
+    app: otel-collector
+    component: collector
+spec:
+  type: ClusterIP
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+    protocol: TCP
+  - name: health-check
+    port: 13133
+    targetPort: 13133
+    protocol: TCP
+  - name: metrics
+    port: 8888
+    targetPort: 8888
+    protocol: TCP
+  selector:
+    app: otel-collector
+
+---
+# LoadBalancer Service (如果需要外部访问)
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-lb
+  namespace: collector
+  labels:
+    app: otel-collector
+    component: collector-lb
+  annotations:
+    # GKE LoadBalancer 配置
+    cloud.google.com/load-balancer-type: "External"
+    # 如果需要内部LoadBalancer，使用以下注解
+    # cloud.google.com/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+    protocol: TCP
+  selector:
+    app: otel-collector
+  sessionAffinity: None
+  # 负载均衡策略
+  externalTrafficPolicy: Cluster
+
+---
+# Headless Service (用于StatefulSet或直接Pod访问)
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-headless
+  namespace: collector
+  labels:
+    app: otel-collector
+    component: collector-headless
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+    protocol: TCP
+  - name: health-check
+    port: 13133
+    targetPort: 13133
+    protocol: TCP
+  - name: metrics
+    port: 8888
+    targetPort: 8888
+    protocol: TCP
+  selector:
+    app: otel-collector 

@@ -1,0 +1,46 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: otel-collector
+  namespace: collector
+  labels:
+    app: otel-collector
+    component: collector
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector
+      component: collector
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - collector
+
+---
+# PodMonitor (如果您使用PodMonitor而不是ServiceMonitor)
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: otel-collector-pods
+  namespace: collector
+  labels:
+    app: otel-collector
+    component: collector
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector
+  podMetricsEndpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http
+    scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+    - collector 
