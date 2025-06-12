@@ -1,25 +1,24 @@
 ---
-- name: Apache配置文件备份 (Ansible Tower优化版)
+- name: Apache配置文件备份 (本地执行版)
   hosts: rproxy
   gather_facts: yes
   become: yes
   
   vars:
-    # Tower友好的变量定义
+    # 本地执行的变量定义
     timestamp: "{{ ansible_date_time.epoch }}"
     zip_filename: "apache-conf-{{ inventory_hostname }}-{{ timestamp }}.zip"
-    # Tower执行环境中的路径
-    local_zip_path: "/tmp/{{ zip_filename }}"
-    local_extract_path: "/tmp/extracted/{{ inventory_hostname }}"
+    # 本地下载路径
+    local_backup_dir: "./backups"
+    local_zip_path: "{{ local_backup_dir }}/{{ zip_filename }}"
+    local_extract_path: "{{ local_backup_dir }}/extracted/{{ inventory_hostname }}"
     
   pre_tasks:
     - name: 验证必要变量是否已定义
       assert:
         that:
-          - github_repo is defined
-          - github_token is defined
           - backup_dir is defined
-        fail_msg: "必要的变量未定义，请在Tower中配置: github_repo, github_token, backup_dir"
+        fail_msg: "必要的变量未定义，请在inventory中配置: backup_dir"
 
     - name: 显示任务开始信息
       debug:
@@ -27,8 +26,16 @@
           🚀 开始Apache配置备份任务
           - 目标主机: {{ inventory_hostname }} ({{ ansible_host }})
           - 备份目录: {{ backup_dir }}
-          - GitHub仓库: {{ github_repo }}
+          - 本地备份目录: {{ local_backup_dir }}
           - 目标分支: {{ github_branch | default('main') }}
+
+    - name: 确保本地备份目录存在
+      file:
+        path: "{{ local_backup_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
 
   tasks:
     - name: 检查远程httpd配置目录
@@ -123,7 +130,7 @@
           - 创建时间: {{ zip_file_stat.stat.mtime }}
       tags: ['backup']
 
-    - name: 下载zip文件到Tower执行节点
+    - name: 下载zip文件到本地
       fetch:
         src: "{{ backup_dir }}/{{ zip_filename }}"
         dest: "{{ local_zip_path }}"
@@ -208,7 +215,7 @@
           备份文件: {{ zip_filename }}
           文件大小: {{ zip_file_stat.stat.size }} bytes
           Ansible版本: {{ ansible_version.full }}
-          Tower任务ID: {{ tower_job_id | default('N/A') }}
+          执行方式: 本地执行
         dest: "{{ local_extract_path }}/backup_metadata.txt"
       delegate_to: localhost
       tags: ['metadata']
@@ -225,22 +232,18 @@
           - 备份时间: {{ ansible_date_time.iso8601 }}
           - 文件数量: {{ extracted_files.matched }}
           
-          🔄 下一步: 使用Tower的Git推送功能或配置后续任务模板
+          📁 备份文件位置:
+          - ZIP文件: {{ local_zip_path }}
+          - 解压目录: {{ local_extract_path }}
 
-    - name: 清理本地临时zip文件
-      file:
-        path: "{{ local_zip_path }}"
-        state: absent
-      delegate_to: localhost
-      tags: ['cleanup']
+    - name: 保留本地zip文件以供后续使用
+      debug:
+        msg: "💾 ZIP文件已保存在: {{ local_zip_path }}"
 
   handlers:
-    - name: 清理所有临时文件
+    - name: 清理远程临时文件
       file:
-        path: "{{ item }}"
+        path: "{{ backup_dir }}/{{ zip_filename }}"
         state: absent
-      loop:
-        - "{{ backup_dir }}/{{ zip_filename }}"
-        - "{{ local_zip_path }}"
       listen: "cleanup on failure"
       ignore_errors: yes 
