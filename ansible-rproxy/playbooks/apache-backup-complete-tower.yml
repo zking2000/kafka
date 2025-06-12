@@ -1,0 +1,237 @@
+---
+- name: 完整Apache配置备份流程 (Ansible Tower优化版)
+  hosts: rproxy
+  gather_facts: yes
+  become: yes
+  serial: "{{ backup_serial | default(1) }}"  # 支持并行执行控制
+  
+  vars:
+    timestamp: "{{ ansible_date_time.epoch }}"
+    zip_filename: "apache-conf-{{ inventory_hostname }}-{{ timestamp }}.zip"
+    local_zip_path: "/tmp/{{ zip_filename }}"
+    local_extract_path: "/tmp/extracted/{{ inventory_hostname }}"
+    
+  pre_tasks:
+    - name: 验证必要变量是否已定义
+      assert:
+        that:
+          - github_repo is defined
+          - github_token is defined
+          - backup_dir is defined
+          - git_user_name is defined
+          - git_user_email is defined
+        fail_msg: "必要的变量未定义，请在Tower中配置所有必需变量"
+
+    - name: 显示任务开始信息
+      debug:
+        msg: |
+          🚀 开始完整Apache配置备份流程
+          - 目标主机: {{ inventory_hostname }} ({{ ansible_host }})
+          - 备份目录: {{ backup_dir }}
+          - GitHub仓库: {{ github_repo }}
+          - 目标分支: {{ github_branch | default('main') }}
+          - 执行模式: {{ 'Serial' if backup_serial == 1 else 'Parallel (' + backup_serial|string + ')' }}
+
+  tasks:
+    # 阶段1: 备份验证
+    - name: 检查远程httpd配置目录
+      stat:
+        path: /etc/httpd/conf
+      register: httpd_conf_dir
+      tags: ['validation', 'backup']
+
+    - name: 验证Apache配置目录存在
+      assert:
+        that:
+          - httpd_conf_dir.stat.exists
+          - httpd_conf_dir.stat.isdir
+        fail_msg: "Apache httpd配置目录 /etc/httpd/conf 不存在或不是目录"
+      tags: ['validation', 'backup']
+
+    # 阶段2: 系统准备
+    - name: 确保远程备份目录存在
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      tags: ['preparation', 'backup']
+
+    - name: 安装必要的软件包
+      package:
+        name: 
+          - zip
+          - unzip
+        state: present
+      tags: ['preparation', 'backup']
+
+    # 阶段3: 创建备份
+    - name: 创建Apache配置文件的zip包
+      archive:
+        path: /etc/httpd/conf
+        dest: "{{ backup_dir }}/{{ zip_filename }}"
+        format: zip
+        mode: '0644'
+        owner: root
+        group: root
+      register: zip_result
+      tags: ['backup']
+
+    - name: 验证zip文件创建成功
+      stat:
+        path: "{{ backup_dir }}/{{ zip_filename }}"
+      register: zip_file_stat
+      tags: ['validation', 'backup']
+
+    - name: 确保zip文件创建成功
+      assert:
+        that:
+          - zip_file_stat.stat.exists
+          - zip_file_stat.stat.size > 0
+        fail_msg: "ZIP文件创建失败或文件为空: {{ backup_dir }}/{{ zip_filename }}"
+      tags: ['validation', 'backup']
+
+    # 阶段4: 下载和解压
+    - name: 下载zip文件到Tower执行节点
+      fetch:
+        src: "{{ backup_dir }}/{{ zip_filename }}"
+        dest: "{{ local_zip_path }}"
+        flat: yes
+        validate_checksum: yes
+      register: fetch_result
+      tags: ['download', 'backup']
+
+    - name: 清理远程临时文件
+      file:
+        path: "{{ backup_dir }}/{{ zip_filename }}"
+        state: absent
+      tags: ['cleanup', 'backup']
+
+    - name: 确保本地解压目录存在
+      file:
+        path: "{{ local_extract_path }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      tags: ['preparation', 'extract']
+
+    - name: 解压zip文件到本地目录
+      unarchive:
+        src: "{{ local_zip_path }}"
+        dest: "{{ local_extract_path }}"
+        remote_src: no
+      delegate_to: localhost
+      tags: ['extract']
+
+    - name: 验证解压成功
+      find:
+        paths: "{{ local_extract_path }}"
+        recurse: yes
+      register: extracted_files
+      delegate_to: localhost
+      tags: ['validation', 'extract']
+
+    - name: 创建备份元数据
+      copy:
+        content: |
+          # Apache配置备份元数据
+          备份时间: {{ ansible_date_time.iso8601 }}
+          源主机: {{ inventory_hostname }}
+          源IP: {{ ansible_host }}
+          备份用户: {{ ansible_user }}
+          系统信息: {{ ansible_os_family }} {{ ansible_distribution_version }}
+          备份文件: {{ zip_filename }}
+          文件大小: {{ zip_file_stat.stat.size }} bytes
+          文件数量: {{ extracted_files.matched }}
+          Ansible版本: {{ ansible_version.full }}
+          Tower任务ID: {{ tower_job_id | default('N/A') }}
+          GitHub分支: {{ github_branch | default('main') }}
+        dest: "{{ local_extract_path }}/backup_metadata.txt"
+      delegate_to: localhost
+      tags: ['metadata', 'extract']
+
+    - name: 清理本地临时zip文件
+      file:
+        path: "{{ local_zip_path }}"
+        state: absent
+      delegate_to: localhost
+      tags: ['cleanup', 'extract']
+
+    - name: 显示备份阶段完成信息
+      debug:
+        msg: |
+          ✅ {{ inventory_hostname }} 备份阶段完成！
+          📦 备份信息:
+          - 文件数量: {{ extracted_files.matched }}
+          - 文件大小: {{ zip_file_stat.stat.size }} bytes
+          - 本地路径: {{ local_extract_path }}
+      tags: ['backup']
+
+# 第二个play: Git推送 (只在localhost执行)
+- name: 推送所有备份到GitHub
+  hosts: localhost
+  gather_facts: no
+  connection: local
+  become: no
+  
+  vars:
+    project_path: "{{ tower_project_path | default('/tmp/tower-projects') }}"
+    backup_source_path: "/tmp/extracted"
+    
+  tasks:
+    - name: 扫描所有主机备份目录
+      find:
+        paths: "{{ backup_source_path }}"
+        file_type: directory
+        depth: 1
+      register: host_dirs
+      tags: ['git', 'scan']
+
+    - name: 显示发现的主机备份
+      debug:
+        msg: |
+          📁 发现的主机备份 ({{ host_dirs.files | length }} 个):
+          {% for dir in host_dirs.files %}
+          - {{ dir.path | basename }}
+          {% endfor %}
+      tags: ['git', 'scan']
+
+    - name: 确保有备份文件需要推送
+      assert:
+        that:
+          - host_dirs.files | length > 0
+        fail_msg: "没有找到任何备份文件需要推送"
+      tags: ['validation', 'git']
+
+    - name: 为每个主机推送备份到GitHub
+      include_tasks: tasks/process-host-backup.yml
+      vars:
+        host_name: "{{ item.path | basename }}"
+        host_backup_path: "{{ item.path }}"
+      loop: "{{ host_dirs.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      tags: ['git', 'push']
+
+    - name: 清理所有备份目录
+      file:
+        path: "{{ backup_source_path }}"
+        state: absent
+      tags: ['cleanup', 'git']
+      when: cleanup_after_push | default(true) | bool
+
+  post_tasks:
+    - name: 显示完整流程完成信息
+      debug:
+        msg: |
+          🎉 完整Apache配置备份流程已完成！
+          
+          📊 执行摘要:
+          - 处理主机数量: {{ host_dirs.files | length }}
+          - GitHub仓库: {{ github_repo }}
+          - 执行时间: {{ ansible_date_time.iso8601 }}
+          - Tower任务ID: {{ tower_job_id | default('N/A') }}
+          
+          ✅ 所有备份已成功推送到GitHub对应分支
+      tags: ['summary'] 
