@@ -1,0 +1,6 @@
+ansible>=4.0.0
+ansible-core>=2.11.0
+requests>=2.25.0
+PyYAML>=5.4.0
+Jinja2>=2.11.0
+cryptography>=3.0.0 
