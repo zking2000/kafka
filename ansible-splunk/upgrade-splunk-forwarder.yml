@@ -1,0 +1,64 @@
+---
+- name: Splunk Universal Forwarder 升级
+  hosts: splunk_forwarders
+  become: yes
+  gather_facts: yes
+  vars:
+    splunk_user: splunk
+    splunk_group: splunk
+    splunk_home: /opt/splunkforwarder
+    new_version: "9.1.2"
+    current_version_check: true
+    backup_configs: true
+    
+  pre_tasks:
+    - name: 验证目标主机连接
+      ping:
+      
+    - name: 检查当前Splunk版本
+      shell: "{{ splunk_home }}/bin/splunk version --accept-license --answer-yes --no-prompt"
+      register: current_version
+      ignore_errors: yes
+      when: current_version_check
+      
+    - name: 显示当前版本信息
+      debug:
+        msg: "当前Splunk版本: {{ current_version.stdout_lines[0] if current_version.stdout_lines is defined else '未检测到' }}"
+      when: current_version_check
+      
+    - name: 检查Splunk进程状态
+      shell: "{{ splunk_home }}/bin/splunk status"
+      register: splunk_status_before
+      ignore_errors: yes
+      
+    - name: 显示升级前状态
+      debug:
+        msg: "升级前Splunk状态: {{ splunk_status_before.stdout_lines[0] if splunk_status_before.stdout_lines is defined else '状态未知' }}"
+
+  roles:
+    - splunk-forwarder-upgrade
+    
+  post_tasks:
+    - name: 验证升级后的版本
+      shell: "{{ splunk_home }}/bin/splunk version --accept-license --answer-yes --no-prompt"
+      register: upgraded_version
+      
+    - name: 检查升级后的服务状态
+      shell: "{{ splunk_home }}/bin/splunk status"
+      register: splunk_status_after
+      
+    - name: 显示升级结果
+      debug:
+        msg: 
+          - "升级后版本: {{ upgraded_version.stdout_lines[0] }}"
+          - "服务状态: {{ splunk_status_after.stdout_lines[0] }}"
+          
+    - name: 验证数据转发功能
+      shell: "{{ splunk_home }}/bin/splunk list forward-server"
+      register: forward_servers
+      ignore_errors: yes
+      
+    - name: 显示转发服务器配置
+      debug:
+        msg: "转发服务器配置: {{ forward_servers.stdout_lines }}"
+      when: forward_servers.stdout_lines is defined 

@@ -1,0 +1,158 @@
+---
+- name: Splunk Universal Forwarder 回滚
+  hosts: splunk_forwarders
+  become: yes
+  gather_facts: yes
+  vars:
+    splunk_user: splunk
+    splunk_group: splunk
+    splunk_home: /opt/splunkforwarder
+    backup_search_path: /tmp/splunk_upgrade
+    
+  pre_tasks:
+    - name: 验证目标主机连接
+      ping:
+      
+    - name: 检查当前Splunk版本
+      shell: "{{ splunk_home }}/bin/splunk version --accept-license --answer-yes --no-prompt"
+      register: current_version_before_rollback
+      ignore_errors: yes
+      
+    - name: 显示回滚前版本信息
+      debug:
+        msg: "回滚前版本: {{ current_version_before_rollback.stdout_lines[0] if current_version_before_rollback.stdout_lines is defined else '未检测到' }}"
+        
+    - name: 查找配置备份文件
+      find:
+        paths: "{{ backup_search_path }}"
+        patterns: "splunk_etc_backup_*.tar.gz"
+        age: "-1d"
+      register: backup_files
+      
+    - name: 显示找到的备份文件
+      debug:
+        msg: "找到备份文件: {{ backup_files.files | map(attribute='path') | list }}"
+      when: backup_files.files | length > 0
+      
+    - name: 确认是否继续回滚
+      pause:
+        prompt: "确认要回滚Splunk Universal Forwarder吗？(y/N)"
+      register: rollback_confirmation
+      when: not (auto_confirm | default(false))
+      
+    - name: 检查用户确认
+      fail:
+        msg: "用户取消了回滚操作"
+      when: 
+        - not (auto_confirm | default(false))
+        - rollback_confirmation.user_input | lower != 'y'
+
+  tasks:
+    - name: 停止Splunk服务
+      shell: "{{ splunk_home }}/bin/splunk stop"
+      register: splunk_stop_result
+      ignore_errors: yes
+      
+    - name: 等待Splunk服务完全停止
+      wait_for:
+        port: 8089
+        host: localhost
+        state: stopped
+        timeout: 60
+      ignore_errors: yes
+      
+    - name: 选择最新的备份文件
+      set_fact:
+        latest_backup: "{{ backup_files.files | sort(attribute='mtime') | last }}"
+      when: backup_files.files | length > 0
+      
+    - name: 显示将要恢复的备份文件
+      debug:
+        msg: "将恢复备份文件: {{ latest_backup.path }}"
+      when: latest_backup is defined
+      
+    - name: 备份当前配置（用于回滚失败的情况）
+      archive:
+        path: "{{ splunk_home }}/etc"
+        dest: "/tmp/splunk_upgrade/splunk_etc_before_rollback_{{ ansible_date_time.epoch }}.tar.gz"
+        format: gz
+      when: latest_backup is defined
+      
+    - name: 删除当前配置目录
+      file:
+        path: "{{ splunk_home }}/etc"
+        state: absent
+      when: latest_backup is defined
+      
+    - name: 恢复配置文件从备份
+      unarchive:
+        src: "{{ latest_backup.path }}"
+        dest: "{{ splunk_home }}"
+        remote_src: yes
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_group }}"
+      when: latest_backup is defined
+      
+    - name: 确保配置文件权限正确
+      file:
+        path: "{{ splunk_home }}/etc"
+        owner: "{{ splunk_user }}"
+        group: "{{ splunk_group }}"
+        recurse: yes
+        state: directory
+      when: latest_backup is defined
+      
+    - name: 启动Splunk服务
+      shell: "{{ splunk_home }}/bin/splunk start --accept-license --answer-yes --no-prompt"
+      become_user: "{{ splunk_user }}"
+      register: splunk_start_result
+      when: latest_backup is defined
+      
+    - name: 等待Splunk服务启动
+      wait_for:
+        port: 8089
+        host: localhost
+        state: started
+        timeout: 120
+      when: latest_backup is defined
+        
+  post_tasks:
+    - name: 验证回滚后的版本
+      shell: "{{ splunk_home }}/bin/splunk version --accept-license --answer-yes --no-prompt"
+      register: rollback_version
+      when: latest_backup is defined
+      
+    - name: 检查回滚后的服务状态
+      shell: "{{ splunk_home }}/bin/splunk status"
+      register: rollback_status
+      when: latest_backup is defined
+      
+    - name: 显示回滚结果
+      debug:
+        msg: 
+          - "回滚后版本: {{ rollback_version.stdout_lines[0] if rollback_version.stdout_lines is defined else '检查失败' }}"
+          - "服务状态: {{ rollback_status.stdout_lines[0] if rollback_status.stdout_lines is defined else '检查失败' }}"
+      when: latest_backup is defined
+      
+    - name: 验证数据转发功能
+      shell: "{{ splunk_home }}/bin/splunk list forward-server"
+      register: forward_servers_after_rollback
+      ignore_errors: yes
+      when: latest_backup is defined
+      
+    - name: 显示转发服务器配置
+      debug:
+        msg: "转发服务器配置: {{ forward_servers_after_rollback.stdout_lines }}"
+      when: 
+        - latest_backup is defined
+        - forward_servers_after_rollback.stdout_lines is defined
+        
+    - name: 回滚完成提示
+      debug:
+        msg: "Splunk Universal Forwarder 回滚已完成！"
+      when: latest_backup is defined
+      
+    - name: 无备份文件警告
+      debug:
+        msg: "警告：未找到有效的配置备份文件，无法执行回滚操作！"
+      when: backup_files.files | length == 0 

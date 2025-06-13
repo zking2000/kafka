@@ -1,0 +1,27 @@
+---
+# Splunk Universal Forwarder 处理程序
+
+- name: restart splunk
+  shell: "{{ splunk_home }}/bin/splunk restart"
+  become_user: "{{ splunk_user }}"
+  listen: restart splunk
+
+- name: stop splunk
+  shell: "{{ splunk_home }}/bin/splunk stop"
+  become_user: "{{ splunk_user }}"
+  listen: stop splunk
+
+- name: start splunk
+  shell: "{{ splunk_home }}/bin/splunk start --accept-license --answer-yes --no-prompt"
+  become_user: "{{ splunk_user }}"
+  listen: start splunk
+
+- name: check splunk status
+  shell: "{{ splunk_home }}/bin/splunk status"
+  register: splunk_status_check
+  listen: check splunk status
+
+- name: show splunk status
+  debug:
+    msg: "Splunk状态检查结果: {{ splunk_status_check.stdout }}"
+  listen: check splunk status 
