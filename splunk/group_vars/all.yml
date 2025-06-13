@@ -1,0 +1,39 @@
+---
+# 全局变量配置文件
+
+# Splunk Universal Forwarder 配置
+splunk_user: splunk
+splunk_group: splunk
+splunk_home: /opt/splunkforwarder
+
+# 版本和包信息
+new_version: "9.1.2"
+splunk_package_name: "splunkforwarder-{{ new_version }}-b6b9c8185839-Linux-x86_64.tgz"
+local_package_path: "./files"
+
+# 升级行为配置
+backup_configs: true
+cleanup_temp_files: true
+current_version_check: true
+force_upgrade: false
+
+# 服务配置
+splunk_mgmt_port: 8089
+splunk_web_port: 8000
+service_start_timeout: 120
+service_stop_timeout: 60
+
+# 系统配置
+ansible_python_interpreter: /usr/bin/python3
+
+# 支持的操作系统
+supported_os_families:
+  - RedHat
+  - Debian
+  - Suse
+
+# 不同操作系统的包管理器
+package_managers:
+  RedHat: yum
+  Debian: apt
+  Suse: zypper 
