@@ -1,5 +1,5 @@
 ---
-- name: Apache配置文件备份 (本地执行版)
+- name: Apache配置文件备份并推送到Git (代理连接版)
   hosts: rproxy
   gather_facts: yes
   become: yes
@@ -8,36 +8,48 @@
     # 本地执行的变量定义
     timestamp: "{{ ansible_date_time.epoch }}"
     zip_filename: "apache-conf-{{ inventory_hostname }}-{{ timestamp }}.zip"
-    # 本地下载路径
+    # 本地路径配置
     local_backup_dir: "./backups"
     local_zip_path: "{{ local_backup_dir }}/{{ zip_filename }}"
     local_extract_path: "{{ local_backup_dir }}/extracted/{{ inventory_hostname }}"
+    local_git_work_dir: "{{ local_backup_dir }}/git-work/{{ inventory_hostname }}"
+    local_git_repo_dir: "{{ local_git_work_dir }}/repo"
     
   pre_tasks:
     - name: 验证必要变量是否已定义
       assert:
         that:
           - backup_dir is defined
-        fail_msg: "必要的变量未定义，请在inventory中配置: backup_dir"
+          - github_repo is defined
+          - github_token is defined
+          - git_user_name is defined
+          - git_user_email is defined
+        fail_msg: "必要的变量未定义，请在inventory中配置: backup_dir, github_repo, github_token, git_user_name, git_user_email"
 
     - name: 显示任务开始信息
       debug:
         msg: |
-          🚀 开始Apache配置备份任务
+          🚀 开始Apache配置备份和Git推送任务
           - 目标主机: {{ inventory_hostname }} ({{ ansible_host }})
           - 备份目录: {{ backup_dir }}
           - 本地备份目录: {{ local_backup_dir }}
+          - GitHub仓库: {{ github_repo }}
           - 目标分支: {{ github_branch | default('main') }}
 
-    - name: 确保本地备份目录存在
+    - name: 确保本地工作目录存在
       file:
-        path: "{{ local_backup_dir }}"
+        path: "{{ item }}"
         state: directory
         mode: '0755'
       delegate_to: localhost
       run_once: true
+      loop:
+        - "{{ local_backup_dir }}"
+        - "{{ local_git_work_dir }}"
+      tags: ['preparation']
 
   tasks:
+    # ========== 远程备份操作 ==========
     - name: 检查远程httpd配置目录
       stat:
         path: /etc/httpd/conf
@@ -77,7 +89,7 @@
         group: root
       tags: ['preparation']
 
-    - name: 安装必要的软件包
+    - name: 安装必要的软件包（仅zip/unzip，不安装git）
       package:
         name: 
           - zip
@@ -130,6 +142,7 @@
           - 创建时间: {{ zip_file_stat.stat.mtime }}
       tags: ['backup']
 
+    # ========== 本地下载和处理 ==========
     - name: 下载zip文件到本地
       fetch:
         src: "{{ backup_dir }}/{{ zip_filename }}"
@@ -193,17 +206,49 @@
       delegate_to: localhost
       tags: ['validation']
 
-    - name: 显示解压信息
-      debug:
-        msg: |
-          📂 解压信息:
-          - 解压路径: {{ local_extract_path }}
-          - 文件数量: {{ extracted_files.matched }}
+    # ========== 本地Git操作 ==========
+    - name: 克隆或更新GitHub仓库到本地
+      git:
+        repo: "https://{{ github_token }}@github.com/{{ github_repo }}.git"
+        dest: "{{ local_git_repo_dir }}"
+        force: yes
+        version: "{{ github_branch | default('main') }}"
       delegate_to: localhost
-      tags: ['extract']
+      environment:
+        GIT_TERMINAL_PROMPT: '0'
+      no_log: true  # 隐藏包含token的日志
+      tags: ['git']
 
-  post_tasks:
-    - name: 创建备份元数据
+    - name: 配置Git用户信息
+      git_config:
+        name: "{{ item.name }}"
+        scope: local
+        value: "{{ item.value }}"
+        repo: "{{ local_git_repo_dir }}"
+      delegate_to: localhost
+      loop:
+        - { name: "user.name", value: "{{ git_user_name }}" }
+        - { name: "user.email", value: "{{ git_user_email }}" }
+      tags: ['git']
+
+    - name: 确保Git仓库中的主机目录存在
+      file:
+        path: "{{ local_git_repo_dir }}/{{ inventory_hostname }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      tags: ['git']
+
+    - name: 同步备份文件到Git仓库
+      synchronize:
+        src: "{{ local_extract_path }}/conf/"
+        dest: "{{ local_git_repo_dir }}/{{ inventory_hostname }}/"
+        delete: yes
+        recursive: yes
+      delegate_to: localhost
+      tags: ['git']
+
+    - name: 创建备份元数据文件
       copy:
         content: |
           # Apache配置备份元数据
@@ -215,35 +260,88 @@
           备份文件: {{ zip_filename }}
           文件大小: {{ zip_file_stat.stat.size }} bytes
           Ansible版本: {{ ansible_version.full }}
-          执行方式: 本地执行
-        dest: "{{ local_extract_path }}/backup_metadata.txt"
+          执行方式: 本地Git操作
+          Git分支: {{ github_branch | default('main') }}
+        dest: "{{ local_git_repo_dir }}/{{ inventory_hostname }}/backup_metadata.txt"
       delegate_to: localhost
-      tags: ['metadata']
+      tags: ['git', 'metadata']
 
+    - name: 检查Git仓库是否有变更
+      shell: |
+        cd "{{ local_git_repo_dir }}"
+        git add .
+        git diff --cached --name-only
+      register: git_changes
+      delegate_to: localhost
+      changed_when: false
+      tags: ['git']
+
+    - name: 提交变更到Git仓库
+      shell: |
+        cd "{{ local_git_repo_dir }}"
+        git add .
+        git commit -m "自动备份Apache配置 - {{ inventory_hostname }} - {{ ansible_date_time.iso8601 }}"
+      delegate_to: localhost
+      when: git_changes.stdout_lines | length > 0
+      register: git_commit
+      tags: ['git']
+
+    - name: 推送变更到GitHub
+      shell: |
+        cd "{{ local_git_repo_dir }}"
+        git push origin {{ github_branch | default('main') }}
+      delegate_to: localhost
+      when: git_commit is changed
+      environment:
+        GIT_TERMINAL_PROMPT: '0'
+      no_log: true  # 隐藏包含token的输出
+      tags: ['git']
+
+  post_tasks:
     - name: 显示任务完成信息
       debug:
         msg: |
-          ✅ 备份任务完成！
+          ✅ 备份和Git推送任务完成！
           📋 摘要信息:
           - 主机: {{ inventory_hostname }} ({{ ansible_host }})
           - 备份文件: {{ zip_filename }}
-          - 本地路径: {{ local_extract_path }}
-          - GitHub分支: {{ github_branch | default('main') }}
+          - 本地解压路径: {{ local_extract_path }}
+          - Git仓库路径: {{ local_git_repo_dir }}
+          - GitHub仓库: {{ github_repo }}
+          - Git分支: {{ github_branch | default('main') }}
           - 备份时间: {{ ansible_date_time.iso8601 }}
           - 文件数量: {{ extracted_files.matched }}
+          {% if git_changes.stdout_lines | length > 0 %}
+          - Git变更: {{ git_changes.stdout_lines | length }} 个文件
+          - Git推送: ✅ 成功
+          {% else %}
+          - Git变更: 无变更，跳过推送
+          {% endif %}
           
-          📁 备份文件位置:
-          - ZIP文件: {{ local_zip_path }}
+          📁 文件位置:
+          - 本地ZIP: {{ local_zip_path }}
           - 解压目录: {{ local_extract_path }}
+          - Git仓库: {{ local_git_repo_dir }}
 
-    - name: 保留本地zip文件以供后续使用
-      debug:
-        msg: "💾 ZIP文件已保存在: {{ local_zip_path }}"
+    - name: 清理本地临时文件（可选）
+      file:
+        path: "{{ item }}"
+        state: absent
+      delegate_to: localhost
+      loop:
+        - "{{ local_zip_path }}"
+        # - "{{ local_extract_path }}"  # 保留解压文件以供检查
+        # - "{{ local_git_work_dir }}"  # 保留Git工作目录以供检查
+      when: cleanup_temp_files | default(false) | bool
+      tags: ['cleanup']
 
   handlers:
-    - name: 清理远程临时文件
+    - name: 清理所有临时文件
       file:
-        path: "{{ backup_dir }}/{{ zip_filename }}"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "{{ backup_dir }}/{{ zip_filename }}"
+        - "{{ local_zip_path }}"
       listen: "cleanup on failure"
       ignore_errors: yes 
