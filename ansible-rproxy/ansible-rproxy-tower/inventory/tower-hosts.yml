@@ -1,0 +1,74 @@
+all:
+  children:
+    rproxy:
+      hosts:
+        # Tower中的主机配置
+        # 注意：在Tower中，这些值通常通过以下方式配置：
+        # 1. Inventory中的Host Variables
+        # 2. Job Template的Extra Variables
+        # 3. Survey（问卷调查）
+        
+        # 示例主机配置（在Tower中通过Host Variables配置）
+        prod-rproxy-1:
+          # 这些变量在Tower中通过Host Variables或Survey配置
+          ansible_host: "{{ tower_target_host | default('TARGET_SERVER_IP') }}"
+          ansible_user: "{{ tower_ssh_user | default('stephen_h_zhou') }}"
+          ansible_ssh_private_key_file: "{{ tower_ssh_key_path | default('/var/lib/awx/.ssh/id_rsa') }}"
+          ansible_port: "{{ tower_ssh_port | default(22) }}"
+          github_branch: "{{ tower_github_branch | default('main') }}"
+          
+          # Tower代理配置 - 通过Tower的Extra Variables或Survey配置
+          ansible_ssh_common_args: >-
+            -o ProxyJump={{ tower_proxy_user | default('stephen_h_zhou') }}@{{ tower_proxy_host | default('PROXY_SERVER_IP') }}:{{ tower_proxy_port | default('22') }}
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -o ControlMaster=auto
+            -o ControlPersist=60s
+        
+        # 如果有多台服务器，可以添加更多主机
+        # prod-rproxy-2:
+        #   ansible_host: "{{ tower_target_host_2 | default('TARGET_SERVER_IP_2') }}"
+        #   ansible_user: "{{ tower_ssh_user | default('stephen_h_zhou') }}"
+        #   ansible_ssh_private_key_file: "{{ tower_ssh_key_path | default('/var/lib/awx/.ssh/id_rsa') }}"
+        #   ansible_port: "{{ tower_ssh_port | default(22) }}"
+        #   github_branch: "{{ tower_github_branch | default('main') }}"
+        #   ansible_ssh_common_args: >-
+        #     -o ProxyJump={{ tower_proxy_user | default('stephen_h_zhou') }}@{{ tower_proxy_host | default('PROXY_SERVER_IP') }}:{{ tower_proxy_port | default('22') }}
+        #     -o StrictHostKeyChecking=no
+        #     -o UserKnownHostsFile=/dev/null
+        
+  vars:
+    # Python解释器
+    ansible_python_interpreter: /usr/bin/python3
+    
+    # 备份配置 - 可在Tower Job Template中覆盖
+    backup_dir: "{{ tower_backup_dir | default('/tmp/apache_backup') }}"
+    
+    # 这些变量应该在Tower中通过以下方式配置：
+    # 1. Job Template的Extra Variables
+    # 2. Survey（问卷调查）
+    # 3. Credentials（凭据）
+    
+    # Git配置 - 通过Tower的Extra Variables或Survey配置
+    tower_github_repo: "{{ tower_github_repo }}"           # 必须在Tower中配置
+    tower_github_token: "{{ tower_github_token }}"         # 通过Tower Credentials配置
+    tower_git_user_name: "{{ tower_git_user_name }}"       # 通过Tower Extra Variables配置
+    tower_git_user_email: "{{ tower_git_user_email }}"     # 通过Tower Extra Variables配置
+    tower_github_branch: "{{ tower_github_branch | default('main') }}"
+    
+    # Tower特有的变量
+    tower_cleanup_temp_files: "{{ tower_cleanup_temp_files | default(false) }}"
+    tower_send_notifications: "{{ tower_send_notifications | default(false) }}"
+    
+    # SSH配置 - Tower会自动处理
+    ansible_ssh_pipelining: yes
+    ansible_ssh_timeout: 60
+    
+    # Tower执行环境配置
+    ansible_ssh_common_args: >-
+      -o StrictHostKeyChecking=no
+      -o UserKnownHostsFile=/dev/null
+      -o ControlMaster=auto
+      -o ControlPersist=300s
+      -o ServerAliveInterval=30
+      -o ServerAliveCountMax=3 

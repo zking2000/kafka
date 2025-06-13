@@ -1,0 +1,366 @@
+---
+- name: Apache配置文件备份并推送到Git (Ansible Tower版)
+  hosts: rproxy
+  gather_facts: yes
+  become: yes
+  
+  vars:
+    # Tower友好的变量定义
+    timestamp: "{{ ansible_date_time.epoch }}"
+    zip_filename: "apache-conf-{{ inventory_hostname }}-{{ timestamp }}.zip"
+    # Tower执行环境中的路径
+    tower_backup_dir: "/tmp/tower-backups"
+    local_zip_path: "{{ tower_backup_dir }}/{{ zip_filename }}"
+    local_extract_path: "{{ tower_backup_dir }}/extracted/{{ inventory_hostname }}"
+    tower_git_work_dir: "{{ tower_backup_dir }}/git-work/{{ inventory_hostname }}"
+    tower_git_repo_dir: "{{ tower_git_work_dir }}/repo"
+    
+  pre_tasks:
+    - name: 验证Tower必要变量是否已定义
+      assert:
+        that:
+          - backup_dir is defined
+          - tower_github_repo is defined
+          - tower_github_token is defined
+          - tower_git_user_name is defined
+          - tower_git_user_email is defined
+        fail_msg: "必要的变量未定义，请在Tower Job Template的Extra Variables中配置相关变量"
+
+    - name: 显示Tower任务开始信息
+      debug:
+        msg: |
+          🚀 开始Apache配置备份和Git推送任务 (Tower执行)
+          - Tower Job ID: {{ tower_job_id | default('N/A') }}
+          - Tower用户: {{ tower_user_name | default('N/A') }}
+          - 目标主机: {{ inventory_hostname }} ({{ ansible_host }})
+          - 备份目录: {{ backup_dir }}
+          - Tower备份目录: {{ tower_backup_dir }}
+          - GitHub仓库: {{ tower_github_repo }}
+          - 目标分支: {{ tower_github_branch | default('main') }}
+
+    - name: 确保Tower工作目录存在
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+      loop:
+        - "{{ tower_backup_dir }}"
+        - "{{ tower_git_work_dir }}"
+      tags: ['preparation']
+
+  tasks:
+    # ========== 远程备份操作 ==========
+    - name: 检查远程httpd配置目录
+      stat:
+        path: /etc/httpd/conf
+      register: httpd_conf_dir
+      tags: ['validation']
+
+    - name: 验证Apache配置目录存在
+      assert:
+        that:
+          - httpd_conf_dir.stat.exists
+          - httpd_conf_dir.stat.isdir
+        fail_msg: "Apache httpd配置目录 /etc/httpd/conf 不存在或不是目录"
+      tags: ['validation']
+
+    - name: 检查SELinux状态（如果存在）
+      command: getenforce
+      register: selinux_status
+      failed_when: false
+      changed_when: false
+      tags: ['system-info']
+
+    - name: 显示系统信息
+      debug:
+        msg: |
+          📊 系统信息:
+          - OS: {{ ansible_os_family }} {{ ansible_distribution_version }}
+          - SELinux: {{ selinux_status.stdout | default('未启用') }}
+          - Python: {{ ansible_python_version }}
+          - Tower执行节点: {{ ansible_hostname }}
+      tags: ['system-info']
+
+    - name: 确保远程备份目录存在
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      tags: ['preparation']
+
+    - name: 安装必要的软件包（仅zip/unzip，不安装git）
+      package:
+        name: 
+          - zip
+          - unzip
+        state: present
+      tags: ['preparation']
+
+    - name: 检查磁盘空间
+      shell: df -h {{ backup_dir }} | tail -1 | awk '{print $4}'
+      register: available_space
+      changed_when: false
+      tags: ['validation']
+
+    - name: 显示可用磁盘空间
+      debug:
+        msg: "📁 备份目录可用空间: {{ available_space.stdout }}"
+      tags: ['validation']
+
+    - name: 创建Apache配置文件的zip包
+      archive:
+        path: /etc/httpd/conf
+        dest: "{{ backup_dir }}/{{ zip_filename }}"
+        format: zip
+        mode: '0644'
+        owner: root
+        group: root
+      register: zip_result
+      tags: ['backup']
+
+    - name: 验证zip文件创建成功
+      stat:
+        path: "{{ backup_dir }}/{{ zip_filename }}"
+      register: zip_file_stat
+      tags: ['validation']
+
+    - name: 确保zip文件创建成功
+      assert:
+        that:
+          - zip_file_stat.stat.exists
+          - zip_file_stat.stat.size > 0
+        fail_msg: "ZIP文件创建失败或文件为空: {{ backup_dir }}/{{ zip_filename }}"
+      tags: ['validation']
+
+    - name: 显示zip文件信息
+      debug:
+        msg: |
+          📦 备份文件信息:
+          - 文件路径: {{ backup_dir }}/{{ zip_filename }}
+          - 文件大小: {{ zip_file_stat.stat.size }} bytes
+          - 创建时间: {{ zip_file_stat.stat.mtime }}
+      tags: ['backup']
+
+    # ========== Tower本地下载和处理 ==========
+    - name: 下载zip文件到Tower执行节点
+      fetch:
+        src: "{{ backup_dir }}/{{ zip_filename }}"
+        dest: "{{ local_zip_path }}"
+        flat: yes
+        validate_checksum: yes
+      register: fetch_result
+      tags: ['download']
+
+    - name: 验证文件下载到Tower成功
+      stat:
+        path: "{{ local_zip_path }}"
+      register: local_zip_stat
+      delegate_to: localhost
+      tags: ['validation']
+
+    - name: 确保Tower本地文件下载成功
+      assert:
+        that:
+          - local_zip_stat.stat.exists
+          - local_zip_stat.stat.size > 0
+        fail_msg: "Tower本地ZIP文件下载失败: {{ local_zip_path }}"
+      delegate_to: localhost
+      tags: ['validation']
+
+    - name: 清理远程临时文件
+      file:
+        path: "{{ backup_dir }}/{{ zip_filename }}"
+        state: absent
+      tags: ['cleanup']
+
+    - name: 确保Tower解压目录存在
+      file:
+        path: "{{ local_extract_path }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      tags: ['preparation']
+
+    - name: 在Tower执行节点解压zip文件
+      unarchive:
+        src: "{{ local_zip_path }}"
+        dest: "{{ local_extract_path }}"
+        remote_src: no
+      delegate_to: localhost
+      tags: ['extract']
+
+    - name: 验证Tower解压成功
+      find:
+        paths: "{{ local_extract_path }}"
+        recurse: yes
+      register: extracted_files
+      delegate_to: localhost
+      tags: ['validation']
+
+    - name: 确保Tower解压成功
+      assert:
+        that:
+          - extracted_files.matched > 0
+        fail_msg: "文件解压失败，没有找到解压的文件"
+      delegate_to: localhost
+      tags: ['validation']
+
+    # ========== Tower Git操作 ==========
+    - name: 在Tower执行节点克隆或更新GitHub仓库
+      git:
+        repo: "https://{{ tower_github_token }}@github.com/{{ tower_github_repo }}.git"
+        dest: "{{ tower_git_repo_dir }}"
+        force: yes
+        version: "{{ tower_github_branch | default('main') }}"
+      delegate_to: localhost
+      environment:
+        GIT_TERMINAL_PROMPT: '0'
+      no_log: true  # 隐藏包含token的日志
+      tags: ['git']
+
+    - name: 在Tower执行节点配置Git用户信息
+      git_config:
+        name: "{{ item.name }}"
+        scope: local
+        value: "{{ item.value }}"
+        repo: "{{ tower_git_repo_dir }}"
+      delegate_to: localhost
+      loop:
+        - { name: "user.name", value: "{{ tower_git_user_name }}" }
+        - { name: "user.email", value: "{{ tower_git_user_email }}" }
+      tags: ['git']
+
+    - name: 确保Git仓库中的主机目录存在
+      file:
+        path: "{{ tower_git_repo_dir }}/{{ inventory_hostname }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      tags: ['git']
+
+    - name: 同步备份文件到Git仓库
+      synchronize:
+        src: "{{ local_extract_path }}/conf/"
+        dest: "{{ tower_git_repo_dir }}/{{ inventory_hostname }}/"
+        delete: yes
+        recursive: yes
+      delegate_to: localhost
+      tags: ['git']
+
+    - name: 创建Tower备份元数据文件
+      copy:
+        content: |
+          # Apache配置备份元数据 (Ansible Tower)
+          备份时间: {{ ansible_date_time.iso8601 }}
+          源主机: {{ inventory_hostname }}
+          源IP: {{ ansible_host }}
+          备份用户: {{ ansible_user }}
+          系统信息: {{ ansible_os_family }} {{ ansible_distribution_version }}
+          备份文件: {{ zip_filename }}
+          文件大小: {{ zip_file_stat.stat.size }} bytes
+          Ansible版本: {{ ansible_version.full }}
+          执行方式: Ansible Tower
+          Tower Job ID: {{ tower_job_id | default('N/A') }}
+          Tower用户: {{ tower_user_name | default('N/A') }}
+          Git分支: {{ tower_github_branch | default('main') }}
+          执行节点: {{ ansible_hostname }}
+        dest: "{{ tower_git_repo_dir }}/{{ inventory_hostname }}/backup_metadata.txt"
+      delegate_to: localhost
+      tags: ['git', 'metadata']
+
+    - name: 检查Git仓库是否有变更
+      shell: |
+        cd "{{ tower_git_repo_dir }}"
+        git add .
+        git diff --cached --name-only
+      register: git_changes
+      delegate_to: localhost
+      changed_when: false
+      tags: ['git']
+
+    - name: 提交变更到Git仓库
+      shell: |
+        cd "{{ tower_git_repo_dir }}"
+        git add .
+        git commit -m "自动备份Apache配置 - {{ inventory_hostname }} - {{ ansible_date_time.iso8601 }} (Tower Job: {{ tower_job_id | default('N/A') }})"
+      delegate_to: localhost
+      when: git_changes.stdout_lines | length > 0
+      register: git_commit
+      tags: ['git']
+
+    - name: 推送变更到GitHub
+      shell: |
+        cd "{{ tower_git_repo_dir }}"
+        git push origin {{ tower_github_branch | default('main') }}
+      delegate_to: localhost
+      when: git_commit is changed
+      environment:
+        GIT_TERMINAL_PROMPT: '0'
+      no_log: true  # 隐藏包含token的输出
+      tags: ['git']
+
+  post_tasks:
+    - name: 显示Tower任务完成信息
+      debug:
+        msg: |
+          ✅ Tower备份和Git推送任务完成！
+          📋 摘要信息:
+          - Tower Job ID: {{ tower_job_id | default('N/A') }}
+          - Tower用户: {{ tower_user_name | default('N/A') }}
+          - 主机: {{ inventory_hostname }} ({{ ansible_host }})
+          - 备份文件: {{ zip_filename }}
+          - Tower解压路径: {{ local_extract_path }}
+          - Git仓库路径: {{ tower_git_repo_dir }}
+          - GitHub仓库: {{ tower_github_repo }}
+          - Git分支: {{ tower_github_branch | default('main') }}
+          - 备份时间: {{ ansible_date_time.iso8601 }}
+          - 文件数量: {{ extracted_files.matched }}
+          {% if git_changes.stdout_lines | length > 0 %}
+          - Git变更: {{ git_changes.stdout_lines | length }} 个文件
+          - Git推送: ✅ 成功
+          {% else %}
+          - Git变更: 无变更，跳过推送
+          {% endif %}
+          
+          📁 Tower文件位置:
+          - Tower ZIP: {{ local_zip_path }}
+          - 解压目录: {{ local_extract_path }}
+          - Git仓库: {{ tower_git_repo_dir }}
+
+    - name: Tower清理临时文件（可选）
+      file:
+        path: "{{ item }}"
+        state: absent
+      delegate_to: localhost
+      loop:
+        - "{{ local_zip_path }}"
+        # - "{{ local_extract_path }}"  # 保留解压文件以供Tower检查
+        # - "{{ tower_git_work_dir }}"  # 保留Git工作目录以供Tower检查
+      when: tower_cleanup_temp_files | default(false) | bool
+      tags: ['cleanup']
+
+    - name: 发送Tower通知（如果配置了通知）
+      debug:
+        msg: |
+          📧 Tower通知信息:
+          - 任务状态: 成功完成
+          - 主机: {{ inventory_hostname }}
+          - 备份时间: {{ ansible_date_time.iso8601 }}
+          - Job ID: {{ tower_job_id | default('N/A') }}
+      when: tower_send_notifications | default(false) | bool
+      tags: ['notification']
+
+  handlers:
+    - name: Tower清理所有临时文件
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ backup_dir }}/{{ zip_filename }}"
+        - "{{ local_zip_path }}"
+      listen: "tower cleanup on failure"
+      ignore_errors: yes 
