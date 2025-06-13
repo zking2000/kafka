@@ -1,0 +1,112 @@
+---
+# Splunk Universal Forwarder 升级任务
+
+- name: 创建临时目录
+  file:
+    path: /tmp/splunk_upgrade
+    state: directory
+    mode: '0755'
+
+- name: 检查当前Splunk版本
+  shell: "{{ splunk_home }}/bin/splunk version --accept-license --answer-yes --no-prompt | head -1"
+  register: current_splunk_version
+  ignore_errors: yes
+
+- name: 显示当前版本
+  debug:
+    msg: "检测到的当前版本: {{ current_splunk_version.stdout }}"
+  when: current_splunk_version.stdout is defined
+
+- name: 停止Splunk服务
+  shell: "{{ splunk_home }}/bin/splunk stop"
+  register: splunk_stop_result
+  ignore_errors: yes
+  notify: restart splunk
+
+- name: 等待Splunk服务完全停止
+  wait_for:
+    port: 8089
+    host: localhost
+    state: stopped
+    timeout: 60
+  ignore_errors: yes
+
+- name: 备份当前配置文件
+  archive:
+    path: "{{ splunk_home }}/etc"
+    dest: "/tmp/splunk_upgrade/splunk_etc_backup_{{ ansible_date_time.epoch }}.tar.gz"
+    format: gz
+  when: backup_configs
+
+- name: 检查安装包文件是否存在
+  stat:
+    path: "{{ local_package_path }}/{{ splunk_package_name }}"
+  delegate_to: localhost
+  register: package_file
+  
+- name: 复制Splunk安装包到目标主机
+  copy:
+    src: "{{ local_package_path }}/{{ splunk_package_name }}"
+    dest: "/tmp/splunk_upgrade/{{ splunk_package_name }}"
+    mode: '0644'
+  when: package_file.stat.exists
+
+- name: 解压Splunk安装包
+  unarchive:
+    src: "/tmp/splunk_upgrade/{{ splunk_package_name }}"
+    dest: /opt
+    remote_src: yes
+    creates: "{{ splunk_home }}/bin/splunk"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_group }}"
+
+- name: 确保Splunk目录权限正确
+  file:
+    path: "{{ splunk_home }}"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_group }}"
+    recurse: yes
+    state: directory
+
+- name: 恢复配置文件权限
+  file:
+    path: "{{ splunk_home }}/etc"
+    owner: "{{ splunk_user }}"
+    group: "{{ splunk_group }}"
+    recurse: yes
+    state: directory
+
+- name: 启动Splunk服务
+  shell: "{{ splunk_home }}/bin/splunk start --accept-license --answer-yes --no-prompt"
+  become_user: "{{ splunk_user }}"
+  register: splunk_start_result
+  notify: check splunk status
+
+- name: 等待Splunk服务启动
+  wait_for:
+    port: 8089
+    host: localhost
+    state: started
+    timeout: 120
+
+- name: 验证升级版本
+  shell: "{{ splunk_home }}/bin/splunk version --accept-license --answer-yes --no-prompt | head -1"
+  register: new_splunk_version
+
+- name: 显示升级后版本
+  debug:
+    msg: "升级后版本: {{ new_splunk_version.stdout }}"
+
+- name: 检查Splunk状态
+  shell: "{{ splunk_home }}/bin/splunk status"
+  register: final_status
+  
+- name: 显示最终状态
+  debug:
+    msg: "Splunk服务状态: {{ final_status.stdout }}"
+
+- name: 清理临时文件
+  file:
+    path: /tmp/splunk_upgrade
+    state: absent
+  when: cleanup_temp_files | default(true) 

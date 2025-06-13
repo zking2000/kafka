@@ -1,0 +1,29 @@
+---
+# Splunk Universal Forwarder 升级变量
+
+# Splunk基本配置
+splunk_user: splunk
+splunk_group: splunk
+splunk_home: /opt/splunkforwarder
+
+# 版本配置
+new_version: "9.1.2"
+splunk_package_name: "splunkforwarder-{{ new_version }}-b6b9c8185839-Linux-x86_64.tgz"
+
+# 路径配置
+local_package_path: "./files"
+backup_configs: true
+cleanup_temp_files: true
+
+# 超时配置
+service_start_timeout: 120
+service_stop_timeout: 60
+
+# 服务端口
+splunk_mgmt_port: 8089
+splunk_web_port: 8000
+
+# 升级行为配置
+current_version_check: true
+force_upgrade: false
+skip_version_check: false 
