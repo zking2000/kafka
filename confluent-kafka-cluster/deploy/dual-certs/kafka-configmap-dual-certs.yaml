@@ -14,8 +14,8 @@ data:
     ssl.keystore.location=/etc/kafka/secrets/kafka.client.keystore.jks
     ssl.keystore.password=${CLIENT_KEYSTORE_PASSWORD}
     ssl.key.password=${CLIENT_KEY_PASSWORD}
-    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
-    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.client.truststore.jks
+    ssl.truststore.password=${CLIENT_TRUSTSTORE_PASSWORD}
     ssl.endpoint.identification.algorithm=
     ssl.client.auth=required
     
@@ -47,8 +47,8 @@ data:
     ssl.keystore.location=/etc/kafka/secrets/kafka.client.keystore.jks
     ssl.keystore.password=${CLIENT_KEYSTORE_PASSWORD}
     ssl.key.password=${CLIENT_KEY_PASSWORD}
-    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
-    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.client.truststore.jks
+    ssl.truststore.password=${CLIENT_TRUSTSTORE_PASSWORD}
     ssl.endpoint.identification.algorithm=
     ssl.client.auth=required
     
@@ -66,8 +66,8 @@ data:
     ssl.keystore.location=/etc/kafka/secrets/kafka.client.keystore.jks
     ssl.keystore.password=${CLIENT_KEYSTORE_PASSWORD}
     ssl.key.password=${CLIENT_KEY_PASSWORD}
-    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
-    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.client.truststore.jks
+    ssl.truststore.password=${CLIENT_TRUSTSTORE_PASSWORD}
     ssl.endpoint.identification.algorithm=
     ssl.client.auth=required
     
@@ -94,8 +94,8 @@ data:
     ssl.keystore.location=/etc/kafka/secrets/kafka.client.keystore.jks
     ssl.keystore.password=${CLIENT_KEYSTORE_PASSWORD}
     ssl.key.password=${CLIENT_KEY_PASSWORD}
-    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
-    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.client.truststore.jks
+    ssl.truststore.password=${CLIENT_TRUSTSTORE_PASSWORD}
     ssl.endpoint.identification.algorithm=
     ssl.client.auth=required
     
@@ -122,8 +122,8 @@ data:
     ssl.keystore.location=/etc/kafka/secrets/kafka.server.keystore.jks
     ssl.keystore.password=${SERVER_KEYSTORE_PASSWORD}
     ssl.key.password=${SERVER_KEY_PASSWORD}
-    ssl.truststore.location=/etc/kafka/secrets/kafka.truststore.jks
-    ssl.truststore.password=${TRUSTSTORE_PASSWORD}
+    ssl.truststore.location=/etc/kafka/secrets/kafka.server.truststore.jks
+    ssl.truststore.password=${SERVER_TRUSTSTORE_PASSWORD}
     ssl.endpoint.identification.algorithm=
     ssl.client.auth=required
     bootstrap.servers=localhost:9092 

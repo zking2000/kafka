@@ -33,67 +33,67 @@ spec:
           # 复制原始证书文件到可写目录
           cp /etc/kafka/secrets-ro/* /etc/kafka/secrets/
           
-          # 创建serverauth凭据文件
-          echo "$SERVERAUTH_KEYSTORE_PASSWORD" > /etc/kafka/secrets/serverauth_keystore_creds
-          echo "$SERVERAUTH_KEY_PASSWORD" > /etc/kafka/secrets/serverauth_key_creds
+          # 创建server凭据文件
+          echo "$SERVER_KEYSTORE_PASSWORD" > /etc/kafka/secrets/server_keystore_creds
+          echo "$SERVER_KEY_PASSWORD" > /etc/kafka/secrets/server_key_creds
           
-          # 创建clientauth凭据文件
-          echo "$CLIENTAUTH_KEYSTORE_PASSWORD" > /etc/kafka/secrets/clientauth_keystore_creds
-          echo "$CLIENTAUTH_KEY_PASSWORD" > /etc/kafka/secrets/clientauth_key_creds
+          # 创建client凭据文件
+          echo "$CLIENT_KEYSTORE_PASSWORD" > /etc/kafka/secrets/client_keystore_creds
+          echo "$CLIENT_KEY_PASSWORD" > /etc/kafka/secrets/client_key_creds
           
-          # 创建serverauth truststore凭据文件
-          echo "$SERVERAUTH_TRUSTSTORE_PASSWORD" > /etc/kafka/secrets/serverauth_truststore_creds
+          # 创建server truststore凭据文件
+          echo "$SERVER_TRUSTSTORE_PASSWORD" > /etc/kafka/secrets/server_truststore_creds
           
-          # 创建clientauth truststore凭据文件
-          echo "$CLIENTAUTH_TRUSTSTORE_PASSWORD" > /etc/kafka/secrets/clientauth_truststore_creds
+          # 创建client truststore凭据文件
+          echo "$CLIENT_TRUSTSTORE_PASSWORD" > /etc/kafka/secrets/client_truststore_creds
           
-          # 为了向后兼容，也创建旧的truststore凭据文件（使用clientauth）
-          echo "$CLIENTAUTH_TRUSTSTORE_PASSWORD" > /etc/kafka/secrets/truststore_creds
+          # 为了向后兼容，也创建旧的truststore凭据文件（使用client）
+          echo "$CLIENT_TRUSTSTORE_PASSWORD" > /etc/kafka/secrets/truststore_creds
           
-          # 为了向后兼容，也创建旧的凭据文件（使用serverauth证书）
-          echo "$SERVERAUTH_KEYSTORE_PASSWORD" > /etc/kafka/secrets/keystore_creds
-          echo "$SERVERAUTH_KEY_PASSWORD" > /etc/kafka/secrets/key_creds
+          # 为了向后兼容，也创建旧的凭据文件（使用server证书）
+          echo "$SERVER_KEYSTORE_PASSWORD" > /etc/kafka/secrets/keystore_creds
+          echo "$SERVER_KEY_PASSWORD" > /etc/kafka/secrets/key_creds
           
           chmod 600 /etc/kafka/secrets/*_creds
           chown 1000:1000 /etc/kafka/secrets/*
         env:
-        # ServerAuth证书密码
-        - name: SERVERAUTH_KEYSTORE_PASSWORD
+        # Server证书密码
+        - name: SERVER_KEYSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.keystore.password
-        - name: SERVERAUTH_KEY_PASSWORD
+              key: server.keystore.password
+        - name: SERVER_KEY_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.key.password
+              key: server.key.password
         
-        # ClientAuth证书密码
-        - name: CLIENTAUTH_KEYSTORE_PASSWORD
+        # Client证书密码
+        - name: CLIENT_KEYSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: clientauth.keystore.password
-        - name: CLIENTAUTH_KEY_PASSWORD
+              key: client.keystore.password
+        - name: CLIENT_KEY_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: clientauth.key.password
+              key: client.key.password
         
-        # ServerAuth Truststore密码（用于验证serverauth证书）
-        - name: SERVERAUTH_TRUSTSTORE_PASSWORD
+        # Server Truststore密码（用于验证server证书）
+        - name: SERVER_TRUSTSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.truststore.password
+              key: server.truststore.password
         
-        # ClientAuth Truststore密码（用于验证clientauth证书）
-        - name: CLIENTAUTH_TRUSTSTORE_PASSWORD
+        # Client Truststore密码（用于验证client证书）
+        - name: CLIENT_TRUSTSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: clientauth.truststore.password
+              key: client.truststore.password
         volumeMounts:
         - name: kafka-secrets-ro
           mountPath: /etc/kafka/secrets-ro
@@ -142,123 +142,123 @@ spec:
         - name: KAFKA_INTER_BROKER_LISTENER_NAME
           value: "INTERNAL_SSL"
         
-        # 全局SSL配置（使用serverauth证书）
+        # 全局SSL配置（使用server证书）
         - name: KAFKA_SSL_KEYSTORE_FILENAME
-          value: "kafka.serverauth.keystore.jks"
+          value: "kafka.server.keystore.jks"
         - name: KAFKA_SSL_KEYSTORE_LOCATION
-          value: "/etc/kafka/secrets/kafka.serverauth.keystore.jks"
+          value: "/etc/kafka/secrets/kafka.server.keystore.jks"
         - name: KAFKA_SSL_KEYSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.keystore.password
+              key: server.keystore.password
         - name: KAFKA_SSL_KEYSTORE_CREDENTIALS
-          value: "serverauth_keystore_creds"
+          value: "server_keystore_creds"
         - name: KAFKA_SSL_KEY_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.key.password
+              key: server.key.password
         - name: KAFKA_SSL_KEY_CREDENTIALS
-          value: "serverauth_key_creds"
+          value: "server_key_creds"
         - name: KAFKA_SSL_TRUSTSTORE_FILENAME
-          value: "kafka.clientauth.truststore.jks"
+          value: "kafka.client.truststore.jks"
         - name: KAFKA_SSL_TRUSTSTORE_LOCATION
-          value: "/etc/kafka/secrets/kafka.clientauth.truststore.jks"
+          value: "/etc/kafka/secrets/kafka.client.truststore.jks"
         - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: clientauth.truststore.password
+              key: client.truststore.password
         - name: KAFKA_SSL_TRUSTSTORE_CREDENTIALS
-          value: "clientauth_truststore_creds"
+          value: "client_truststore_creds"
         - name: KAFKA_SSL_CLIENT_AUTH
           value: "required"
         - name: KAFKA_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
           value: ""
         
-        # INTERNAL_SSL监听器特定SSL配置（serverauth证书）
+        # INTERNAL_SSL监听器特定SSL配置（server证书）
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_KEYSTORE_FILENAME
-          value: "kafka.serverauth.keystore.jks"
+          value: "kafka.server.keystore.jks"
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_KEYSTORE_LOCATION
-          value: "/etc/kafka/secrets/kafka.serverauth.keystore.jks"
+          value: "/etc/kafka/secrets/kafka.server.keystore.jks"
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_KEYSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.keystore.password
+              key: server.keystore.password
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_KEY_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.key.password
+              key: server.key.password
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_TRUSTSTORE_FILENAME
-          value: "kafka.serverauth.truststore.jks"
+          value: "kafka.server.truststore.jks"
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_TRUSTSTORE_LOCATION
-          value: "/etc/kafka/secrets/kafka.serverauth.truststore.jks"
+          value: "/etc/kafka/secrets/kafka.server.truststore.jks"
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_TRUSTSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.truststore.password
+              key: server.truststore.password
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_CLIENT_AUTH
           value: "required"
         - name: KAFKA_LISTENER_NAME_INTERNAL_SSL_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
           value: ""
         
-        # EXTERNAL_SSL监听器特定SSL配置（serverauth证书）
+        # EXTERNAL_SSL监听器特定SSL配置（server证书）
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_KEYSTORE_FILENAME
-          value: "kafka.serverauth.keystore.jks"
+          value: "kafka.server.keystore.jks"
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_KEYSTORE_LOCATION
-          value: "/etc/kafka/secrets/kafka.serverauth.keystore.jks"
+          value: "/etc/kafka/secrets/kafka.server.keystore.jks"
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_KEYSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.keystore.password
+              key: server.keystore.password
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_KEY_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.key.password
+              key: server.key.password
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_TRUSTSTORE_FILENAME
-          value: "kafka.clientauth.truststore.jks"
+          value: "kafka.client.truststore.jks"
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_TRUSTSTORE_LOCATION
-          value: "/etc/kafka/secrets/kafka.clientauth.truststore.jks"
+          value: "/etc/kafka/secrets/kafka.client.truststore.jks"
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_TRUSTSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: clientauth.truststore.password
+              key: client.truststore.password
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_CLIENT_AUTH
           value: "required"
         - name: KAFKA_LISTENER_NAME_EXTERNAL_SSL_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
           value: ""
         
-        # CONTROLLER监听器特定SSL配置（serverauth证书）
+        # CONTROLLER监听器特定SSL配置（server证书）
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_KEYSTORE_FILENAME
-          value: "kafka.serverauth.keystore.jks"
+          value: "kafka.server.keystore.jks"
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_KEYSTORE_LOCATION
-          value: "/etc/kafka/secrets/kafka.serverauth.keystore.jks"
+          value: "/etc/kafka/secrets/kafka.server.keystore.jks"
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_KEYSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.keystore.password
+              key: server.keystore.password
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_KEY_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.key.password
+              key: server.key.password
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_TRUSTSTORE_FILENAME
-          value: "kafka.serverauth.truststore.jks"
+          value: "kafka.server.truststore.jks"
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_TRUSTSTORE_LOCATION
-          value: "/etc/kafka/secrets/kafka.serverauth.truststore.jks"
+          value: "/etc/kafka/secrets/kafka.server.truststore.jks"
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_TRUSTSTORE_PASSWORD
           valueFrom:
             secretKeyRef:
               name: kafka-ssl-certs
-              key: serverauth.truststore.password
+              key: server.truststore.password
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_CLIENT_AUTH
           value: "required"
         - name: KAFKA_LISTENER_NAME_CONTROLLER_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM
