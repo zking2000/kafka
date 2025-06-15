@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelcol-kafka-consumer
+  namespace: confluent-kafka
+  labels:
+    app: otelcol
+    component: kafka-consumer
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: otelcol
+      component: kafka-consumer
+  template:
+    metadata:
+      labels:
+        app: otelcol
+        component: kafka-consumer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8889"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: otelcol-kafka-consumer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+      - name: otelcol
+        image: otel/opentelemetry-collector-contrib:0.97.0
+        imagePullPolicy: IfNotPresent
+        command:
+          - /otelcol-contrib
+          - --config=/etc/otelcol/config.yaml
+        ports:
+        - name: metrics
+          containerPort: 8889
+          protocol: TCP
+        - name: health
+          containerPort: 13133
+          protocol: TCP
+        - name: pprof
+          containerPort: 1777
+          protocol: TCP
+        - name: zpages
+          containerPort: 55679
+          protocol: TCP
+        - name: internal-mtr
+          containerPort: 8888
+          protocol: TCP
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_CLUSTER_NAME
+          value: "kafka-cluster"
+        # SSL相关环境变量
+        - name: KAFKA_SSL_KEYSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.client.keystore.jks"
+        - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.client.truststore.jks"
+        - name: KAFKA_SSL_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: client.keystore.password
+        - name: KAFKA_SSL_KEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: client.key.password
+        - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: client.truststore.password
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 13133
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 13133
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/otelcol
+          readOnly: true
+        - name: kafka-ssl-certs
+          mountPath: /etc/kafka/secrets
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: otelcol-config-basic
+          items:
+          - key: config.yaml
+            path: config.yaml
+      - name: kafka-ssl-certs
+        secret:
+          secretName: kafka-ssl-certs
+          items:
+          - key: kafka.client.keystore.jks
+            path: kafka.client.keystore.jks
+          - key: kafka.client.truststore.jks
+            path: kafka.client.truststore.jks
+          - key: client.keystore.password
+            path: client.keystore.password
+          - key: client.key.password
+            path: client.key.password
+          - key: client.truststore.password
+            path: client.truststore.password
+      terminationGracePeriodSeconds: 60
+      restartPolicy: Always 

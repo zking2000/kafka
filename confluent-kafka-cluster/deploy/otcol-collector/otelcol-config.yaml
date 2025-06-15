@@ -1,0 +1,196 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-config
+  namespace: confluent-kafka
+  labels:
+    app: otelcol
+    component: config
+data:
+  config.yaml: |
+    receivers:
+      # Kafka接收器 - 日志
+      kafka/logs:
+        protocol_version: 2.6.0
+        brokers:
+          - kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9092
+          - kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9092
+          - kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9092
+        topic: otcol_logs
+        group_id: otelcol-logs-consumer
+        client_id: otelcol-logs
+        auth:
+          tls:
+            cert_file: /etc/kafka/secrets/kafka.client.keystore.jks
+            key_file: /etc/kafka/secrets/kafka.client.keystore.jks
+            ca_file: /etc/kafka/secrets/kafka.client.truststore.jks
+            insecure: false
+        encoding: otlp_proto
+        initial_offset: earliest
+        
+      # Kafka接收器 - 指标
+      kafka/metrics:
+        protocol_version: 2.6.0
+        brokers:
+          - kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9092
+          - kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9092
+          - kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9092
+        topic: otcol_metrics
+        group_id: otelcol-metrics-consumer
+        client_id: otelcol-metrics
+        auth:
+          tls:
+            cert_file: /etc/kafka/secrets/kafka.client.keystore.jks
+            key_file: /etc/kafka/secrets/kafka.client.keystore.jks
+            ca_file: /etc/kafka/secrets/kafka.client.truststore.jks
+            insecure: false
+        encoding: otlp_proto
+        initial_offset: earliest
+          
+      # Kafka接收器 - 链路追踪
+      kafka/traces:
+        protocol_version: 2.6.0
+        brokers:
+          - kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9092
+          - kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9092
+          - kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9092
+        topic: otcol_traces
+        group_id: otelcol-traces-consumer
+        client_id: otelcol-traces
+        auth:
+          tls:
+            cert_file: /etc/kafka/secrets/kafka.client.keystore.jks
+            key_file: /etc/kafka/secrets/kafka.client.keystore.jks
+            ca_file: /etc/kafka/secrets/kafka.client.truststore.jks
+            insecure: false
+        encoding: otlp_proto
+        initial_offset: earliest
+          
+      # 健康检查接收器
+      prometheus/internal:
+        config:
+          scrape_configs:
+            - job_name: 'otelcol'
+              scrape_interval: 10s
+              static_configs:
+                - targets: ['0.0.0.0:8888']
+
+    processors:
+      # 批处理器 - 提高性能
+      batch/logs:
+        timeout: 5s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+      
+      batch/metrics:
+        timeout: 5s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+        
+      batch/traces:
+        timeout: 5s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+      
+      # 内存限制器
+      memory_limiter:
+        limit_mib: 512
+        spike_limit_mib: 128
+        check_interval: 5s
+      
+      # 资源检测器
+      resourcedetection:
+        detectors: [env, system]
+        timeout: 2s
+        override: false
+
+    exporters:
+      # Loki导出器 - 日志
+      loki:
+        endpoint: http://loki.grafana-stack.svc.cluster.local:3100/loki/api/v1/push
+        headers:
+          X-Scope-OrgID: "tenant1"
+        timeout: 10s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+          
+      # Mimir导出器 - 指标  
+      prometheusremotewrite/mimir:
+        endpoint: http://mimir.grafana-stack.svc.cluster.local:8080/api/v1/push
+        headers:
+          X-Scope-OrgID: "tenant1"
+        timeout: 10s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+        resource_to_telemetry_conversion:
+          enabled: true
+        
+      # Tempo导出器 - 链路追踪
+      otlp/tempo:
+        endpoint: http://tempo.grafana-stack.svc.cluster.local:4317
+        tls:
+          insecure: true
+        timeout: 10s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+        headers:
+          X-Scope-OrgID: "tenant1"
+          
+      # Debug导出器 - 用于调试
+      debug:
+        verbosity: normal
+        sampling_initial: 2
+        sampling_thereafter: 500
+        
+      # Prometheus导出器 - 内部指标
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+        const_labels:
+          service: "otelcol-kafka-consumer"
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /health
+      pprof:
+        endpoint: 0.0.0.0:1777
+      zpages:
+        endpoint: 0.0.0.0:55679
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        # 日志管道
+        logs:
+          receivers: [kafka/logs]
+          processors: [memory_limiter, resourcedetection, batch/logs]
+          exporters: [loki, debug]
+          
+        # 指标管道  
+        metrics:
+          receivers: [kafka/metrics, prometheus/internal]
+          processors: [memory_limiter, resourcedetection, batch/metrics]
+          exporters: [prometheusremotewrite/mimir, prometheus, debug]
+          
+        # 链路追踪管道
+        traces:
+          receivers: [kafka/traces]
+          processors: [memory_limiter, resourcedetection, batch/traces]  
+          exporters: [otlp/tempo, debug]
+      
+      telemetry:
+        logs:
+          level: "info"
+          encoding: "console"
+        metrics:
+          level: basic
+          address: 0.0.0.0:8888 

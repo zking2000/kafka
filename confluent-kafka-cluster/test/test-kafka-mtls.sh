@@ -64,11 +64,11 @@ check_namespace() {
 check_secrets() {
     log_info "检查必需的Secret"
     
-    if ! kubectl get secret kafka-keystore -n $NAMESPACE &> /dev/null; then
-        log_error "Secret kafka-keystore 不存在"
+    if ! kubectl get secret kafka-ssl-certs -n $NAMESPACE &> /dev/null; then
+        log_error "Secret kafka-ssl-certs 不存在"
         exit 1
     fi
-    log_success "Secret kafka-keystore 存在"
+    log_success "Secret kafka-ssl-certs 存在"
 }
 
 # 检查Pod状态
@@ -176,7 +176,7 @@ test_cluster_connectivity() {
 # 获取密码的函数
 get_password() {
     local password_type="$1"
-    local password=$(kubectl get secret kafka-keystore -n $NAMESPACE -o jsonpath="{.data.${password_type}\.password}" 2>/dev/null | base64 -d 2>/dev/null)
+    local password=$(kubectl get secret kafka-ssl-certs -n $NAMESPACE -o jsonpath="{.data.${password_type}\.password}" 2>/dev/null | base64 -d 2>/dev/null)
     echo "$password"
 }
 
@@ -185,15 +185,15 @@ diagnose_ssl_setup() {
     log_info "诊断SSL配置问题"
     
     # 检查Secret是否存在及其内容
-    log_info "检查kafka-keystore Secret"
-    if kubectl get secret kafka-keystore -n $NAMESPACE &> /dev/null; then
-        log_success "kafka-keystore Secret存在"
+    log_info "检查kafka-ssl-certs Secret"
+    if kubectl get secret kafka-ssl-certs -n $NAMESPACE &> /dev/null; then
+        log_success "kafka-ssl-certs Secret存在"
         
         # 检查Secret中的密码字段
-        local secret_keys=$(kubectl get secret kafka-keystore -n $NAMESPACE -o jsonpath='{.data}' | jq -r 'keys[]' 2>/dev/null || echo "无法获取")
+        local secret_keys=$(kubectl get secret kafka-ssl-certs -n $NAMESPACE -o jsonpath='{.data}' | jq -r 'keys[]' 2>/dev/null || echo "无法获取")
         log_info "Secret中的密钥: $secret_keys"
     else
-        log_error "kafka-keystore Secret不存在"
+        log_error "kafka-ssl-certs Secret不存在"
         return 1
     fi
     
@@ -225,9 +225,9 @@ create_pod_client_config() {
     log_info "在Pod内创建客户端配置文件"
     
     # 从Secret获取密码
-    local KEYSTORE_PASSWORD=$(get_password "keystore")
-    local KEY_PASSWORD=$(get_password "key")
-    local TRUSTSTORE_PASSWORD=$(get_password "truststore")
+    local KEYSTORE_PASSWORD=$(kubectl get secret kafka-ssl-certs -n $NAMESPACE -o jsonpath="{.data.keystore\.password}" 2>/dev/null | base64 -d 2>/dev/null)
+    local KEY_PASSWORD=$(kubectl get secret kafka-ssl-certs -n $NAMESPACE -o jsonpath="{.data.key\.password}" 2>/dev/null | base64 -d 2>/dev/null)
+    local TRUSTSTORE_PASSWORD=$(kubectl get secret kafka-ssl-certs -n $NAMESPACE -o jsonpath="{.data.truststore\.password}" 2>/dev/null | base64 -d 2>/dev/null)
     
     if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ] || [ -z "$TRUSTSTORE_PASSWORD" ]; then
         log_error "无法从Secret获取密码"
@@ -239,7 +239,7 @@ create_pod_client_config() {
         sh -c 'if [ -f /etc/kafka/secrets/keystore_creds ]; then echo "exists"; else echo "missing"; fi' 2>/dev/null)
     
     if [ "$creds_check" = "missing" ]; then
-        log_warning "凭据文件不存在，使用直接密码方式创建配置"
+        log_info "凭据文件不存在，使用直接密码方式创建配置"
         
         # 在Pod内创建配置文件，直接使用密码
         kubectl exec kafka-0 -n $NAMESPACE -- sh -c "
@@ -447,9 +447,9 @@ test_ssl_connection() {
         log_warning "凭据文件不存在，尝试从Secret重新创建"
         
         # 尝试重新创建凭据文件
-        local KEYSTORE_PASSWORD=$(get_password "keystore")
-        local KEY_PASSWORD=$(get_password "key")
-        local TRUSTSTORE_PASSWORD=$(get_password "truststore")
+        local KEYSTORE_PASSWORD=$(kubectl get secret kafka-ssl-certs -n $NAMESPACE -o jsonpath="{.data.keystore\.password}" 2>/dev/null | base64 -d 2>/dev/null)
+        local KEY_PASSWORD=$(kubectl get secret kafka-ssl-certs -n $NAMESPACE -o jsonpath="{.data.key\.password}" 2>/dev/null | base64 -d 2>/dev/null)
+        local TRUSTSTORE_PASSWORD=$(kubectl get secret kafka-ssl-certs -n $NAMESPACE -o jsonpath="{.data.truststore\.password}" 2>/dev/null | base64 -d 2>/dev/null)
         
         if [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ] && [ -n "$TRUSTSTORE_PASSWORD" ]; then
             kubectl exec kafka-0 -n $NAMESPACE -- sh -c "

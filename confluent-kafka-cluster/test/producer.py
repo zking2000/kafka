@@ -22,9 +22,9 @@ topic_name = "test_44084750"
 
 ssl_config = {
     "security_protocol": "SSL",
-    "ssl_cafile": "/Users/stephenzhou/Desktop/workspace/kafka/ha-mtls/k8s/kafka/scripts/opentelemetry/new-certs/ca-cert.crt",
-    "ssl_certfile": "/Users/stephenzhou/Desktop/workspace/kafka/ha-mtls/k8s/kafka/scripts/opentelemetry/new-certs/client-cert.crt",
-    "ssl_keyfile": "/Users/stephenzhou/Desktop/workspace/kafka/ha-mtls/k8s/kafka/scripts/opentelemetry/new-certs/client-key.key",
+    "ssl_cafile": "../deploy/certs/ca-cert.pem",
+    "ssl_certfile": "../deploy/certs/kafka-client-cert.pem",
+    "ssl_keyfile": "../deploy/certs/kafka-client-key.pem",
     "ssl_check_hostname": False,
     "api_version_auto_timeout_ms": 60000,
 }
