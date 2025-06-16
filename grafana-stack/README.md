@@ -1,11 +1,29 @@
-# Loki 速率优化部署配置
+# Loki 3.1.1 GCS存储速率优化部署配置
 
-这个配置专门针对OpenTelemetry遇到的速率限制和队列爆掉问题进行了优化。
+这个配置专门针对OpenTelemetry遇到的速率限制和队列爆掉问题进行了优化，使用Google Cloud Storage (GCS) 作为对象存储。
 
 ## 🚀 快速部署
 
+### 前置条件
+1. 确保有一个GCS存储桶：`loki_44084750`
+2. GKE集群（启用Workload Identity）
+3. 适当的GCP权限（创建服务账号、IAM绑定）
+
+### 部署步骤
 ```bash
-# 执行部署脚本
+# 1. 设置环境变量
+export PROJECT_ID=your-gcp-project-id
+export CLUSTER_NAME=your-gke-cluster-name
+export CLUSTER_ZONE=your-cluster-zone
+export GSA_NAME=loki-storage  # 可选，默认为loki-storage
+
+# 2. 设置Workload Identity
+./setup-workload-identity.sh
+
+# 3. 验证配置
+./verify-loki-config.sh
+
+# 4. 执行部署脚本
 ./deploy-loki.sh
 ```
 
@@ -13,7 +31,9 @@
 
 - `loki-namespace.yaml` - grafana-stack namespace定义
 - `loki-configmap.yaml` - Loki主配置和运行时配置
-- `loki-deployment.yaml` - Loki部署、服务配置
+- `loki-deployment.yaml` - Loki部署、服务配置（使用Workload Identity）
+- `loki-serviceaccount.yaml` - Kubernetes ServiceAccount（Workload Identity）
+- `setup-workload-identity.sh` - Workload Identity自动化设置脚本
 - `loki-hpa.yaml` - 水平Pod自动伸缩和Pod中断预算
 - `loki-servicemonitor.yaml` - Prometheus监控配置
 - `deploy-loki.sh` - 自动化部署脚本
@@ -38,10 +58,16 @@
 - **扩容策略**: 积极扩容，保守缩容
 - **监控指标**: CPU 70%，内存 80%
 
+### 存储配置
+- **对象存储**: Google Cloud Storage (GCS)
+- **存储桶**: `loki_44084750`
+- **索引存储**: TSDB (本地缓存)
+- **本地存储**: 10GB缓存 + 10GB WAL
+
 ### 资源配置
 - **CPU**: 请求1核，限制2核
 - **内存**: 请求2GB，限制4GB
-- **存储**: 50GB数据，10GB WAL
+- **本地存储**: 10GB缓存，10GB WAL（主要数据存储在GCS）
 
 ## 📊 监控指标
 

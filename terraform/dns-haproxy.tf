@@ -473,7 +473,7 @@ resource "google_compute_instance" "haproxy_0_vm" {
   
   boot_disk {
     initialize_params {
-      image = "ubuntu-os-cloud/ubuntu-2004-lts"
+      image = "ubuntu-os-cloud/ubuntu-2204-lts"
       size  = 20
       type  = "pd-standard"
     }
@@ -518,7 +518,7 @@ resource "google_compute_instance" "haproxy_1_vm" {
   
   boot_disk {
     initialize_params {
-      image = "ubuntu-os-cloud/ubuntu-2004-lts"
+      image = "ubuntu-os-cloud/ubuntu-2204-lts"
       size  = 20
       type  = "pd-standard"
     }
@@ -563,7 +563,7 @@ resource "google_compute_instance" "haproxy_2_vm" {
   
   boot_disk {
     initialize_params {
-      image = "ubuntu-os-cloud/ubuntu-2004-lts"
+      image = "ubuntu-os-cloud/ubuntu-2204-lts"
       size  = 20
       type  = "pd-standard"
     }
