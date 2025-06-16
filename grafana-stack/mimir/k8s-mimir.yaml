@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mimir
+  namespace: mimir-demo
+  labels:
+    app: mimir
+spec:
+  serviceName: mimir-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mimir
+  template:
+    metadata:
+      labels:
+        app: mimir
+    spec:
+      serviceAccountName: mimir-service-account
+      containers:
+      - name: mimir
+        image: grafana/mimir:2.10.0
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9095
+          name: grpc
+        - containerPort: 7946
+          name: memberlist
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/mimir
+        - name: data
+          mountPath: /data
+        command:
+        - /bin/mimir
+        - -config.file=/etc/mimir/mimir.yaml
+        - -target=all
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 5
+      volumes:
+      - name: config-volume
+        configMap:
+          name: mimir-config-gcs
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: standard-rwo
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mimir
+  namespace: mimir-demo
+  labels:
+    app: mimir
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  - port: 9095
+    targetPort: 9095
+    name: grpc
+  selector:
+    app: mimir
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mimir-headless
+  namespace: mimir-demo
+  labels:
+    app: mimir
+spec:
+  clusterIP: None
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+  - port: 9095
+    targetPort: 9095
+    name: grpc
+  - port: 7946
+    targetPort: 7946
+    name: memberlist
+  selector:
+    app: mimir 

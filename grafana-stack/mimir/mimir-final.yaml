@@ -1,0 +1,84 @@
+# Mimir配置 - GCS存储版本（核心组件）
+target: distributor,ingester,querier,store-gateway,compactor
+
+server:
+  http_listen_port: 8080
+  grpc_listen_port: 9095
+  log_level: info
+
+# 通用配置 - 使用GCS存储
+common:
+  storage:
+    backend: gcs
+    gcs:
+      bucket_name: "mimir-demo-bucket-1750084462"
+
+# 块存储配置
+blocks_storage:
+  backend: gcs
+  gcs:
+    bucket_name: "mimir-demo-bucket-1750084462"
+  tsdb:
+    dir: /data/tsdb
+    retention_period: 24h
+  bucket_store:
+    sync_dir: /data/tsdb-sync
+
+# 分发器配置
+distributor:
+  ring:
+    kvstore:
+      store: memberlist
+
+# 摄取器配置
+ingester:
+  ring:
+    kvstore:
+      store: memberlist
+    tokens_file_path: /data/tokens
+
+# 查询器配置
+querier:
+  max_concurrent: 16
+
+# 存储网关配置
+store_gateway:
+  sharding_ring:
+    kvstore:
+      store: memberlist
+
+# 压缩器配置
+compactor:
+  data_dir: /data/compactor
+  sharding_ring:
+    kvstore:
+      store: memberlist
+
+
+
+# Memberlist配置
+memberlist:
+  abort_if_cluster_join_fails: false
+  bind_port: 7946
+  join_members:
+    - mimir-0.mimir-headless.mimir-demo.svc.cluster.local:7946
+
+
+
+# 统治者存储配置（使用独立bucket）
+ruler_storage:
+  backend: gcs
+  gcs:
+    bucket_name: "mimir-ruler-bucket-1750088900"
+
+# 告警管理器存储配置（使用独立bucket）
+alertmanager_storage:
+  backend: gcs
+  gcs:
+    bucket_name: "mimir-ruler-bucket-1750088900"
+
+# 限制配置
+limits:
+  compactor_blocks_retention_period: 24h
+  ingestion_rate: 10000
+  ingestion_burst_size: 20000 

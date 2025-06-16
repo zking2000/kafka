@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memcached
+  namespace: mimir-demo
+  labels:
+    app: memcached
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: memcached
+  template:
+    metadata:
+      labels:
+        app: memcached
+    spec:
+      containers:
+      - name: memcached
+        image: memcached:1.6.22-alpine
+        ports:
+        - containerPort: 11211
+          name: memcached
+        command:
+        - memcached
+        - -m
+        - "64"  # 64MB内存
+        - -I
+        - "5m"  # 最大item大小
+        - -c
+        - "1024"  # 最大连接数
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memcached
+  namespace: mimir-demo
+  labels:
+    app: memcached
+spec:
+  ports:
+  - port: 11211
+    targetPort: 11211
+    name: memcached
+  selector:
+    app: memcached 

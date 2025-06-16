@@ -1,0 +1,176 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mimir-config
+  namespace: mimir-demo
+data:
+  mimir.yaml: |
+    # Mimir配置文件 - GKE Demo环境
+    # 使用GCS作为后端存储，24小时数据保留策略
+    
+    target: read,write
+    
+    server:
+      http_listen_port: 8080
+      grpc_listen_port: 9095
+      log_level: info
+    
+    # 通用配置
+    common:
+      storage:
+        backend: gcs
+        gcs:
+          bucket_name: "mimir-demo-bucket-1750084462"  # 请替换为您的GCS bucket名称
+    
+    # 块存储配置
+    blocks_storage:
+      backend: gcs
+      gcs:
+        bucket_name: "mimir-demo-bucket-1750084462"
+      tsdb:
+        dir: /data/tsdb
+        retention_period: 24h  # 24小时数据保留
+      bucket_store:
+        sync_dir: /data/tsdb-sync
+    
+    # 压缩器配置
+    compactor:
+      data_dir: /data/compactor
+      sharding_ring:
+        kvstore:
+          store: memberlist
+      deletion_delay: 1h
+      cleanup_interval: 15m
+    
+    # 分发器配置
+    distributor:
+      ring:
+        kvstore:
+          store: memberlist
+    
+    # 摄取器配置
+    ingester:
+      ring:
+        kvstore:
+          store: memberlist
+        tokens_file_path: /data/tokens
+    
+    # 查询器配置
+    querier:
+      max_concurrent: 16
+    
+    # 查询前端配置
+    frontend:
+      results_cache:
+        backend: memcached
+        memcached:
+          addresses: "memcached:11211"
+      query_stats_enabled: true
+    
+    # 存储网关配置
+    store_gateway:
+      sharding_ring:
+        kvstore:
+          store: memberlist
+    
+
+    
+    # Memberlist配置（用于服务发现）
+    memberlist:
+      abort_if_cluster_join_fails: false
+      bind_port: 7946
+      join_members:
+        - mimir-0.mimir-headless.mimir-demo.svc.cluster.local:7946
+    
+    # 限制配置
+    limits:
+      # 数据保留相关限制
+      compactor_blocks_retention_period: 24h
+      ingestion_rate: 10000
+      ingestion_burst_size: 20000
+      max_global_series_per_user: 150000
+      max_global_series_per_metric: 20000
+    
+    # 运行时配置
+    runtime_config:
+      file: /etc/mimir/runtime.yaml
+
+  runtime.yaml: |
+    # Mimir运行时配置
+    # 用于动态配置限制和其他运行时参数
+    
+    # 覆盖配置
+    overrides:
+      # 默认租户限制
+      "tenant1":
+        ingestion_rate: 10000
+        ingestion_burst_size: 20000
+        max_global_series_per_user: 100000
+        max_global_series_per_metric: 10000
+        compactor_blocks_retention_period: "24h"
+    
+    # 多租户配置（可选）
+    multi_tenancy_enabled: false
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: mimir-demo
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    
+    # 远程写入配置 - 将数据发送到Mimir
+    remote_write:
+      - url: http://mimir:8080/api/v1/push
+        queue_config:
+          max_samples_per_send: 1000
+          max_shards: 200
+          capacity: 2500
+    
+    # 抓取配置
+    scrape_configs:
+      # 抓取Prometheus自身的指标
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+    
+      # 抓取Mimir的指标
+      - job_name: 'mimir'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - mimir-demo
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: mimir
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource
+  namespace: mimir-demo
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    
+    datasources:
+      - name: Mimir
+        type: prometheus
+        access: proxy
+        url: http://mimir:8080/prometheus
+        isDefault: true
+        editable: true
+        jsonData:
+          httpMethod: POST
+          prometheusType: Mimir
+          prometheusVersion: 2.40.0
+          queryTimeout: 60s
+          timeInterval: 30s 
