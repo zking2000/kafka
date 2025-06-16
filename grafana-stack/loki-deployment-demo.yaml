@@ -94,6 +94,8 @@ spec:
           mountPath: /loki
         - name: wal
           mountPath: /loki/wal
+        - name: rules
+          mountPath: /loki/rules
         
         # Demo环境安全上下文
         securityContext:
@@ -128,6 +130,9 @@ spec:
       - name: wal
         emptyDir:
           sizeLimit: 2Gi  # Demo环境WAL存储
+      - name: rules
+        emptyDir:
+          sizeLimit: 1Gi  # Demo环境规则存储
 
 ---
 apiVersion: v1
