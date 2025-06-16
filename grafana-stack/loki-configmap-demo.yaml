@@ -33,6 +33,7 @@ data:
       reject_old_samples_max_age: 24h
       split_queries_by_interval: 15m
       allow_structured_metadata: true
+      retention_period: 24h
 
     common:
       instance_addr: 127.0.0.1
@@ -84,7 +85,10 @@ data:
     compactor:
       working_directory: /loki/compactor
       compaction_interval: 10m
-      retention_enabled: false
+      retention_enabled: true
+      retention_delete_delay: 2h
+      retention_delete_worker_count: 150
+      delete_request_store: gcs
 
     # Ruler配置 - Demo环境
     ruler:
@@ -114,4 +118,6 @@ data:
     max_global_streams_per_user: 100000
     max_query_parallelism: 16
     ingestion_rate_mb: 20
-    ingestion_burst_size_mb: 40 
+    ingestion_burst_size_mb: 40
+    # 24小时数据保留策略
+    retention_period: 24h
