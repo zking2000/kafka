@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-to-otlp-bridge
+  namespace: confluent-kafka
+data:
+  bridge.py: |
+    #!/usr/bin/env python3
+    import os
+    import ssl
+    import json
+    import time
+    import logging
+    import requests
+    from kafka import KafkaConsumer
+    from concurrent.futures import ThreadPoolExecutor
+    
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    # Kafka配置
+    KAFKA_BROKERS = [
+        'kafka-0-internal.confluent-kafka.svc.cluster.local:9093',
+        'kafka-1-internal.confluent-kafka.svc.cluster.local:9093',
+        'kafka-2-internal.confluent-kafka.svc.cluster.local:9093'
+    ]
+    
+    # OTLP端点 - 统一使用logs端点，通过属性区分类型
+    OTLP_ENDPOINT = 'http://otelcol-mtls:4318/v1/logs'
+    
+    def create_ssl_context():
+        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.load_verify_locations('/etc/kafka/certs/ca-cert.pem')
+        context.load_cert_chain('/etc/kafka/certs/kafka-client-cert.pem', '/etc/kafka/certs/kafka-client-key.pem')
+        return context
+    
+    def consume_topic(topic_name):
+        logger.info(f"开始消费topic: {topic_name}")
+        
+        consumer = KafkaConsumer(
+            topic_name,
+            bootstrap_servers=KAFKA_BROKERS,
+            group_id=f'kafka-to-otlp-{topic_name}',
+            client_id=f'bridge-{topic_name}',
+            auto_offset_reset='latest',
+            security_protocol='SSL',
+            ssl_context=create_ssl_context(),
+            value_deserializer=lambda m: m.decode('utf-8') if m else None
+        )
+        
+        for message in consumer:
+            try:
+                logger.info(f"收到消息从 {topic_name}: partition={message.partition}, offset={message.offset}")
+                
+                # 转发到OTLP
+                if message.value:
+                    # 检查消息是否是protobuf格式
+                    try:
+                        # 尝试作为protobuf发送
+                        response = requests.post(
+                            OTLP_ENDPOINT,
+                            data=message.value,
+                            headers={'Content-Type': 'application/x-protobuf'},
+                            timeout=10
+                        )
+                        
+                        if response.status_code == 200:
+                            logger.info(f"成功转发protobuf消息到OTLP: {topic_name}")
+                        else:
+                            logger.warning(f"Protobuf转发失败 {response.status_code}: {response.text[:200]}, 尝试作为JSON: {topic_name}")
+                            # 如果protobuf失败，统一作为logs发送，通过属性区分原始类型
+                            json_payload = {
+                                "resourceLogs": [{
+                                    "resource": {
+                                        "attributes": [{
+                                            "key": "service.name",
+                                            "value": {"stringValue": f"kafka-bridge-{topic_name}"}
+                                        }, {
+                                            "key": "original.data.type",
+                                            "value": {"stringValue": topic_name.replace('otcol_', '')}
+                                        }]
+                                    },
+                                    "scopeLogs": [{
+                                        "scope": {"name": "kafka-bridge"},
+                                        "logRecords": [{
+                                            "timeUnixNano": str(int(time.time() * 1_000_000_000)),
+                                            "body": {"stringValue": message.value},
+                                            "attributes": [{
+                                                "key": "kafka.topic",
+                                                "value": {"stringValue": topic_name}
+                                            }, {
+                                                "key": "kafka.partition", 
+                                                "value": {"intValue": str(message.partition)}
+                                            }, {
+                                                "key": "kafka.offset",
+                                                "value": {"intValue": str(message.offset)}
+                                            }, {
+                                                "key": "data.type",
+                                                "value": {"stringValue": topic_name.replace('otcol_', '')}
+                                            }]
+                                        }]
+                                    }]
+                                }]
+                            }
+                            
+                            json_response = requests.post(
+                                OTLP_ENDPOINT,
+                                json=json_payload,
+                                headers={'Content-Type': 'application/json'},
+                                timeout=10
+                            )
+                            
+                            if json_response.status_code == 200:
+                                logger.info(f"成功转发JSON消息到OTLP: {topic_name}")
+                            else:
+                                logger.error(f"JSON转发也失败: {json_response.status_code} - {json_response.text}")
+                                
+                    except Exception as e:
+                        logger.error(f"转发消息时发生异常: {str(e)}")
+                        
+            except Exception as e:
+                logger.error(f"处理消息失败: {str(e)}")
+    
+    def main():
+        logger.info("启动Kafka到OTLP桥接服务")
+        
+        topics = ['otcol_logs', 'otcol_metrics', 'otcol_traces']
+        
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(consume_topic, topic) for topic in topics]
+            
+            try:
+                for future in futures:
+                    future.result()
+            except KeyboardInterrupt:
+                logger.info("收到停止信号")
+    
+    if __name__ == "__main__":
+        main()
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-to-otlp-bridge
+  namespace: confluent-kafka
+  labels:
+    app: kafka-to-otlp-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-to-otlp-bridge
+  template:
+    metadata:
+      labels:
+        app: kafka-to-otlp-bridge
+    spec:
+      containers:
+      - name: bridge
+        image: python:3.9-slim
+        command:
+          - "sh"
+          - "-c"
+          - "pip install kafka-python requests && python3 /app/bridge.py"
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        volumeMounts:
+        - name: bridge-script
+          mountPath: /app
+        - name: kafka-certs-pem
+          mountPath: /etc/kafka/certs
+          readOnly: true
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: bridge-script
+        configMap:
+          name: kafka-to-otlp-bridge
+          defaultMode: 0755
+      - name: kafka-certs-pem
+        configMap:
+          name: kafka-certs-pem 

@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-mtls-kafka
+  namespace: confluent-kafka
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      # OTLP接收器 - 用于直接接收数据
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+      # Kafka接收器 - 日志 (使用简化配置)
+      kafka/logs:
+        brokers:
+          - kafka-0-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-1-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-2-internal.confluent-kafka.svc.cluster.local:9093
+        topic: otcol_logs
+        group_id: otelcol-logs-consumer
+        client_id: otelcol-logs
+        encoding: otlp_proto
+        initial_offset: latest  # 改为latest避免重复消费
+        auth:
+          tls:
+            insecure: false
+            insecure_skip_verify: true
+            cert_file: /etc/kafka/certs/kafka-client-cert.pem
+            key_file: /etc/kafka/certs/kafka-client-key.pem
+            ca_file: /etc/kafka/certs/ca-cert.pem
+
+      # Kafka接收器 - 指标 (使用简化配置)
+      kafka/metrics:
+        brokers:
+          - kafka-0-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-1-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-2-internal.confluent-kafka.svc.cluster.local:9093
+        topic: otcol_metrics
+        group_id: otelcol-metrics-consumer
+        client_id: otelcol-metrics
+        encoding: otlp_proto
+        initial_offset: latest
+        auth:
+          tls:
+            insecure: false
+            insecure_skip_verify: true
+            cert_file: /etc/kafka/certs/kafka-client-cert.pem
+            key_file: /etc/kafka/certs/kafka-client-key.pem
+            ca_file: /etc/kafka/certs/ca-cert.pem
+
+      # Kafka接收器 - 追踪 (使用简化配置)
+      kafka/traces:
+        brokers:
+          - kafka-0-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-1-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-2-internal.confluent-kafka.svc.cluster.local:9093
+        topic: otcol_traces
+        group_id: otelcol-traces-consumer
+        client_id: otelcol-traces
+        encoding: otlp_proto
+        initial_offset: latest
+        auth:
+          tls:
+            insecure: false
+            insecure_skip_verify: true
+            cert_file: /etc/kafka/certs/kafka-client-cert.pem
+            key_file: /etc/kafka/certs/kafka-client-key.pem
+            ca_file: /etc/kafka/certs/ca-cert.pem
+
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+
+    exporters:
+      debug:
+        verbosity: detailed
+      
+      logging:
+        loglevel: info
+        
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+
+    service:
+      extensions: [health_check]
+      
+      pipelines:
+        logs:
+          receivers: [kafka/logs, otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, logging]
+
+        metrics:
+          receivers: [kafka/metrics, otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, prometheus]
+
+        traces:
+          receivers: [kafka/traces, otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, logging]
+
+      telemetry:
+        logs:
+          level: "info"
+        metrics:
+          address: 0.0.0.0:8888 

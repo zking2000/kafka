@@ -114,13 +114,13 @@ spec:
           name: kraft-api
         - containerPort: 9999
           name: jmx
-        resources:
-          requests:
-            memory: "3Gi"
-            cpu: "1000m"
-          limits:
-            memory: "6Gi"
-            cpu: "2000m"
+        # resources:
+        #   requests:
+        #     memory: "3Gi"
+        #     cpu: "1000m"
+        #   limits:
+        #     memory: "6Gi"
+        #     cpu: "2000m"
         env:
         # KRaft配置
         - name: KAFKA_PROCESS_ROLES
@@ -351,7 +351,7 @@ spec:
           export KAFKA_NODE_ID=${POD_NAME##*-}
           
           # 动态设置 ADVERTISED_LISTENERS
-          export KAFKA_ADVERTISED_LISTENERS="INTERNAL_SSL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9092,EXTERNAL_SSL://${POD_NAME}-external.confluent-kafka.svc.cluster.local:9093,KRAFT_API://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9095"
+          export KAFKA_ADVERTISED_LISTENERS="INTERNAL_SSL://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9092,EXTERNAL_SSL://${POD_NAME}-internal.confluent-kafka.svc.cluster.local:9093,KRAFT_API://${POD_NAME}.kafka-headless.confluent-kafka.svc.cluster.local:9095"
           
           echo "Starting Kafka with NODE_ID: $KAFKA_NODE_ID"
           echo "ADVERTISED_LISTENERS: $KAFKA_ADVERTISED_LISTENERS"

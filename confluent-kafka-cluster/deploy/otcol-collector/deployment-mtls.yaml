@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otelcol-mtls
+  namespace: confluent-kafka
+  labels:
+    app: otelcol-mtls
+    component: collector
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: otelcol-mtls
+      component: collector
+  template:
+    metadata:
+      labels:
+        app: otelcol-mtls
+        component: collector
+    spec:
+      containers:
+      - name: otelcol
+        image: otel/opentelemetry-collector-contrib:0.128.0
+        command:
+          - "/otelcol-contrib"
+          - "--config=/conf/config.yaml"
+        env:
+        - name: KAFKA_SSL_KEYSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.client.keystore.jks"
+        - name: KAFKA_SSL_KEYSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: client.keystore.password
+        - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+          value: "/etc/kafka/secrets/kafka.client.truststore.jks"
+        - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: client.truststore.password
+        - name: KAFKA_SSL_KEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kafka-ssl-certs
+              key: client.key.password
+        ports:
+        - name: otlp-grpc
+          containerPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          containerPort: 4318
+          protocol: TCP
+        - name: health
+          containerPort: 13133
+          protocol: TCP
+        - name: metrics
+          containerPort: 8889
+          protocol: TCP
+        - name: internal-mtr
+          containerPort: 8888
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: config
+          mountPath: /conf
+          readOnly: true
+        - name: kafka-certs-pem
+          mountPath: /etc/kafka/certs
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: otelcol-kafka-debug
+      - name: kafka-certs-pem
+        configMap:
+          name: kafka-certs-pem
+      restartPolicy: Always 

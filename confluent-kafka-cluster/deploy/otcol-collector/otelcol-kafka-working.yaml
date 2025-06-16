@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-kafka-working
+  namespace: confluent-kafka
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      # 只配置一个Kafka接收器先测试
+      kafka/logs:
+        brokers:
+          - kafka-0-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-1-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-2-internal.confluent-kafka.svc.cluster.local:9093
+        topic: otcol_logs
+        group_id: otelcol-logs-consumer-v2
+        client_id: otelcol-logs-v2
+        encoding: otlp_proto
+        initial_offset: latest
+        auth:
+          tls:
+            insecure: false
+            insecure_skip_verify: true
+            cert_file: /etc/kafka/certs/kafka-client-cert.pem
+            key_file: /etc/kafka/certs/kafka-client-key.pem
+            ca_file: /etc/kafka/certs/ca-cert.pem
+
+      # OTLP接收器作为备用
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+
+    exporters:
+      debug:
+        verbosity: detailed
+
+    service:
+      extensions: [health_check]
+      
+      pipelines:
+        logs:
+          receivers: [kafka/logs, otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug]
+
+      telemetry:
+        logs:
+          level: "info"
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888 

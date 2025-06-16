@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-tempo-only
+  namespace: confluent-kafka
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      # Kafka接收器用于traces
+      kafka/traces:
+        brokers:
+          - kafka-0-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-1-internal.confluent-kafka.svc.cluster.local:9093
+          - kafka-2-internal.confluent-kafka.svc.cluster.local:9093
+        topic: otcol_traces
+        group_id: otelcol-tempo-consumer
+        client_id: otelcol-tempo
+        encoding: otlp_proto
+        initial_offset: latest
+        auth:
+          tls:
+            insecure: false
+            insecure_skip_verify: true
+            cert_file: /etc/kafka/certs/kafka-client-cert.pem
+            key_file: /etc/kafka/certs/kafka-client-key.pem
+            ca_file: /etc/kafka/certs/ca-cert.pem
+
+      # OTLP接收器
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+
+    exporters:
+      # Tempo exporter
+      otlp/tempo:
+        endpoint: http://tempo:3200
+        tls:
+          insecure: true
+        headers:
+          # 如果需要认证，取消注释并设置正确的token
+          # authorization: "Bearer your-tempo-token"
+      
+      # Debug exporter用于调试
+      debug:
+        verbosity: detailed
+
+    service:
+      extensions: [health_check]
+      
+      pipelines:
+        traces:
+          receivers: [kafka/traces, otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlp/tempo, debug]
+
+      telemetry:
+        logs:
+          level: "info"
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888 

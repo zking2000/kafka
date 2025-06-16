@@ -1,57 +1,62 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: otelcol-config-simple
+  name: otelcol-simple
   namespace: confluent-kafka
-  labels:
-    app: otelcol
-    component: config
 data:
   config.yaml: |
-    receivers:
-      # Kafka接收器 - 日志
-      kafka/logs:
-        protocol_version: 2.6.0
-        brokers:
-          - kafka-0.kafka-headless.confluent-kafka.svc.cluster.local:9092
-          - kafka-1.kafka-headless.confluent-kafka.svc.cluster.local:9092
-          - kafka-2.kafka-headless.confluent-kafka.svc.cluster.local:9092
-        topic: otcol_logs
-        group_id: otelcol-logs-consumer
-        client_id: otelcol-logs
-        encoding: otlp_proto
-        initial_offset: earliest
-
-    processors:
-      # 批处理器
-      batch:
-        timeout: 5s
-        send_batch_size: 1024
-
-    exporters:      
-      # Debug导出器
-      debug:
-        verbosity: normal
-        
-      # Loki导出器 - 日志
-      loki:
-        endpoint: http://loki.grafana-stack.svc.cluster.local:3100/loki/api/v1/push
-        headers:
-          X-Scope-OrgID: "tenant1"
-
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
 
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+
+    exporters:
+      debug:
+        verbosity: detailed
+      
+      logging:
+        loglevel: info
+        
+      prometheus:
+        endpoint: "0.0.0.0:8889"
+
     service:
       extensions: [health_check]
-      pipelines:
-        # 日志管道
-        logs:
-          receivers: [kafka/logs]
-          processors: [batch]
-          exporters: [debug, loki]
       
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, logging]
+
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, prometheus]
+
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, logging]
+
       telemetry:
         logs:
-          level: "info" 
+          level: "info"
+        metrics:
+          address: 0.0.0.0:8888 

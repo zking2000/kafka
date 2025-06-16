@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: observability
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      kafka:
+        protocol_version: 2.0.0
+        brokers: ["<your-kafka-bootstrap>:9093"]
+        topic: otcol_logs
+        encoding: json
+        auth:
+          tls:
+            ca_file: /etc/kafka-mtls/kafka-ca.crt
+            cert_file: /etc/kafka-mtls/kafka-client.crt
+            key_file: /etc/kafka-mtls/kafka-client.key
+            insecure_skip_verify: false
+        topics:
+          logs: otcol_logs
+          traces: otcol_traces
+          metrics: otcol_metrics
+
+    processors:
+      batch: {}
+
+    exporters:
+      loki:
+        endpoint: http://loki:3100/loki/api/v1/push
+        labels:
+          job: otel-kafka
+      tempo:
+        endpoint: http://tempo:4317
+        tls:
+          insecure: true
+      prometheusremotewrite:
+        endpoint: http://mimir:9009/api/v1/push
+        tls:
+          insecure: true
+
+    service:
+      pipelines:
+        logs:
+          receivers: [kafka]
+          processors: [batch]
+          exporters: [loki]
+        traces:
+          receivers: [kafka]
+          processors: [batch]
+          exporters: [tempo]
+        metrics:
+          receivers: [kafka]
+          processors: [batch]
+          exporters: [prometheusremotewrite]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kafka-mtls-secret
+  namespace: observability
+type: Opaque
+data:
+  kafka-ca.crt: <base64-encoded-ca>
+  kafka-client.crt: <base64-encoded-client-cert>
+  kafka-client.key: <base64-encoded-client-key>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      serviceAccountName: otel-collector-sa
+      containers:
+      - name: otel-collector
+        image: otel/opentelemetry-collector-contrib:latest
+        command:
+          - "/otelcontribcol"
+          - "--config=/conf/otel-collector-config.yaml"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /conf
+        - name: kafka-mtls
+          mountPath: /etc/kafka-mtls
+          readOnly: true
+      volumes:
+      - name: config-volume
+        configMap:
+          name: otel-collector-config
+      - name: kafka-mtls
+        secret:
+          secretName: kafka-mtls-secret
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector-sa
+  namespace: observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+- apiGroups: [""]
+  resources: ["pods", "nodes", "namespaces"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+- kind: ServiceAccount
+  name: otel-collector-sa
+  namespace: observability
+
+# kubectl create namespace observability
+# kubectl apply -f kafka-mtls-secret.yaml
+# kubectl apply -f otel-collector-configmap.yaml
+# kubectl apply -f otel-collector-deployment.yaml
+# kubectl apply -f otel-collector-rbac.yaml

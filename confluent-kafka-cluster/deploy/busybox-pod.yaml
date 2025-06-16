@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+  namespace: confluent-kafka
+  labels:
+    app: busybox
+spec:
+  containers:
+  - name: busybox
+    image: busybox:1.35
+    command:
+    - sleep
+    - "3600"  # 睡眠1小时
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+  restartPolicy: Always 

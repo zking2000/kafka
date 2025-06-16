@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otelcol-kafka-debug
+  namespace: confluent-kafka
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      # 使用直接IP地址而不是DNS名称
+      kafka/logs:
+        brokers:
+          - "10.1.1.33:9093"
+        topic: otcol_logs
+        group_id: otelcol-debug-consumer
+        client_id: otelcol-debug
+        encoding: otlp_proto
+        initial_offset: latest
+        auth:
+          tls:
+            insecure: false
+            insecure_skip_verify: true
+            cert_file: /etc/kafka/certs/kafka-client-cert.pem
+            key_file: /etc/kafka/certs/kafka-client-key.pem
+            ca_file: /etc/kafka/certs/ca-cert.pem
+
+      # OTLP接收器作为备用
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 256
+
+    exporters:
+      debug:
+        verbosity: detailed
+      
+      # Tempo exporter for traces
+      otlp/tempo:
+        endpoint: http://tempo:3200
+        tls:
+          insecure: true
+        headers:
+          # 如果Tempo需要认证，可以在这里添加
+          # authorization: "Bearer your-token"
+      
+      # 如果你有Loki用于logs
+      loki:
+        endpoint: http://loki:3100/loki/api/v1/push
+        tls:
+          insecure: true
+      
+      # 如果你有Mimir/Prometheus用于metrics  
+      prometheusremotewrite:
+        endpoint: http://mimir:9009/api/v1/push
+        tls:
+          insecure: true
+
+    service:
+      extensions: [health_check]
+      
+      pipelines:
+        logs:
+          receivers: [kafka/logs, otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, loki]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, prometheusremotewrite]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [debug, otlp/tempo]
+
+      telemetry:
+        logs:
+          level: "debug"  # 增加日志级别
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888 
