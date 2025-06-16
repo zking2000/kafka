@@ -1,163 +1,175 @@
-# Loki 3.1.1 GCS存储速率优化部署配置
+# Loki 3.1.1 Demo环境部署
 
-这个配置专门针对OpenTelemetry遇到的速率限制和队列爆掉问题进行了优化，使用Google Cloud Storage (GCS) 作为对象存储。
+本项目提供在 Kubernetes 集群中部署 **Demo环境** Loki 3.1.1 的完整配置。
+
+## 🎯 Demo环境特性
+
+### 📊 配置概览
+- **版本**: Loki 3.1.1
+- **模式**: 单体模式 (monolithic)
+- **副本数**: 1个Pod
+- **认证**: 禁用 (`auth_enabled: false`)
+- **存储**: emptyDir (非持久化) + GCS对象存储
+- **资源**: 500m CPU, 1GB内存
+- **限制**: 20MB/s写入，40MB/s突发
+
+### 🔧 技术配置
+- **Schema**: v13 + TSDB
+- **WAL**: 启用
+- **压缩**: 启用
+- **命名空间**: `grafana-stack`
+- **GCS存储桶**: `loki_44084750`
 
 ## 🚀 快速部署
 
 ### 前置条件
-1. 确保有一个GCS存储桶：`loki_44084750`
-2. GKE集群（启用Workload Identity）
-3. 适当的GCP权限（创建服务账号、IAM绑定）
-
-### 部署步骤
 ```bash
-# 1. 设置环境变量
-export PROJECT_ID=your-gcp-project-id
-export CLUSTER_NAME=your-gke-cluster-name
-export CLUSTER_ZONE=your-cluster-zone
-export GSA_NAME=loki-storage  # 可选，默认为loki-storage
+# 确保kubectl已连接到集群
+kubectl cluster-info
 
-# 2. 设置Workload Identity
-./setup-workload-identity.sh
+# 确保有namespace权限
+kubectl auth can-i create namespace
+```
 
-# 3. 验证配置
-./verify-loki-config.sh
+### 一键部署
+```bash
+chmod +x deploy-loki-demo.sh
+./deploy-loki-demo.sh
+```
 
-# 4. 执行部署脚本
-./deploy-loki.sh
+### 手动部署
+```bash
+# 1. 创建namespace
+kubectl create namespace grafana-stack
+
+# 2. 部署ServiceAccount (Workload Identity)
+kubectl apply -f loki-serviceaccount.yaml
+
+# 3. 部署配置
+kubectl apply -f loki-configmap-demo.yaml
+
+# 4. 部署Loki
+kubectl apply -f loki-deployment-demo.yaml
+```
+
+## 📊 验证部署
+
+### 检查Pod状态
+```bash
+kubectl get pods -l app=loki -n grafana-stack
+```
+
+### 检查服务
+```bash
+kubectl get svc -l app=loki -n grafana-stack
+```
+
+### 健康检查
+```bash
+# 端口转发
+kubectl port-forward svc/loki 3100:3100 -n grafana-stack
+
+# 测试接口
+curl http://localhost:3100/ready
+curl http://localhost:3100/metrics
+```
+
+### 查看日志
+```bash
+kubectl logs -f deployment/loki -n grafana-stack
+```
+
+## 📡 使用Demo环境
+
+### 发送测试日志
+```bash
+# 使用promtail或其他日志收集器发送到:
+# http://loki.grafana-stack.svc.cluster.local:3100
+```
+
+### Grafana集成
+在Grafana中添加Loki数据源：
+```
+URL: http://loki.grafana-stack.svc.cluster.local:3100
+```
+
+### LogQL查询示例
+```logql
+# 查看所有日志
+{job="example"}
+
+# 过滤错误日志
+{job="example"} |= "error"
+
+# 时间范围查询
+{job="example"}[5m]
+```
+
+## 🗑️ 清理环境
+
+### 删除Loki部署
+```bash
+kubectl delete namespace grafana-stack
+```
+
+### 或者单独删除资源
+```bash
+kubectl delete -f loki-deployment-demo.yaml
+kubectl delete -f loki-configmap-demo.yaml
+kubectl delete -f loki-serviceaccount.yaml
+```
+
+## ⚠️ Demo环境注意事项
+
+1. **非持久化存储**: 使用emptyDir，Pod重启会丢失本地数据
+2. **单副本**: 无高可用性，适合测试和开发
+3. **无认证**: 任何有集群访问权限的用户都可以访问
+4. **资源限制**: 较小的资源配置，不适合高负载
+5. **无监控**: 未包含生产级监控和告警
+
+## 🔧 配置定制
+
+### 调整资源限制
+编辑 `loki-deployment-demo.yaml`:
+```yaml
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+```
+
+### 调整写入限制
+编辑 `loki-configmap-demo.yaml`:
+```yaml
+limits_config:
+  ingestion_rate_mb: 20
+  ingestion_burst_size_mb: 40
 ```
 
 ## 📁 文件说明
 
-- `loki-namespace.yaml` - grafana-stack namespace定义
-- `loki-configmap.yaml` - Loki主配置和运行时配置
-- `loki-deployment.yaml` - Loki部署、服务配置（使用Workload Identity）
-- `loki-serviceaccount.yaml` - Kubernetes ServiceAccount（Workload Identity）
-- `setup-workload-identity.sh` - Workload Identity自动化设置脚本
-- `loki-hpa.yaml` - 水平Pod自动伸缩和Pod中断预算
-- `loki-servicemonitor.yaml` - Prometheus监控配置
-- `deploy-loki.sh` - 自动化部署脚本
+- `loki-configmap-demo.yaml` - Demo环境Loki配置
+- `loki-deployment-demo.yaml` - Demo环境部署配置
+- `loki-serviceaccount.yaml` - Workload Identity服务账号
+- `deploy-loki-demo.sh` - 自动化部署脚本
+- `setup-workload-identity.sh` - Workload Identity设置脚本
 
-## 🔧 主要优化配置
+## 🆙 升级到生产环境
 
-### 速率限制优化
-- **摄取速率**: 50MB/s（突发100MB/s）
-- **最大流数**: 500,000个全局流
-- **查询并发**: 32个并行查询
-- **消息大小**: 100MB gRPC消息限制
+Demo环境验证后，可考虑以下生产级改进：
+- 启用认证和多租户
+- 使用持久化存储 (PVC)
+- 配置多副本和自动伸缩
+- 添加监控和告警
+- 实施网络策略
+- 配置备份策略
 
-### 性能优化
-- **Chunk配置**: 优化块大小和刷新频率
-- **并发刷新**: 32个并发刷新操作
-- **WAL启用**: 防止数据丢失
-- **内存限制器**: 256MB限制防止OOM
+---
 
-### 自动伸缩
-- **最小副本**: 2个（高可用）
-- **最大副本**: 8个（应对突发）
-- **扩容策略**: 积极扩容，保守缩容
-- **监控指标**: CPU 70%，内存 80%
-
-### 存储配置
-- **对象存储**: Google Cloud Storage (GCS)
-- **存储桶**: `loki_44084750`
-- **索引存储**: TSDB (本地缓存)
-- **本地存储**: 10GB缓存 + 10GB WAL
-
-### 资源配置
-- **CPU**: 请求1核，限制2核
-- **内存**: 请求2GB，限制4GB
-- **本地存储**: 10GB缓存，10GB WAL（主要数据存储在GCS）
-
-## 📊 监控指标
-
-部署包含ServiceMonitor配置，监控以下关键指标：
-
-- 摄取速率 (`loki_distributor_received_samples_total`)
-- 错误率 (`loki_*_errors_total`)
-- 队列大小 (`loki_*_queue_*`)
-- 延迟指标 (`loki_*_duration_seconds`)
-
-## 🔍 故障排查
-
-### 检查Loki状态
-```bash
-kubectl get pods -n grafana-stack -l app=loki
-kubectl logs -n grafana-stack -l app=loki
-```
-
-### 查看HPA状态
-```bash
-kubectl get hpa -n grafana-stack
-kubectl describe hpa loki-hpa -n grafana-stack
-```
-
-### 检查配置
-```bash
-kubectl get configmap loki-config -n grafana-stack -o yaml
-```
-
-### 端口转发测试
-```bash
-# HTTP端点
-kubectl port-forward -n grafana-stack svc/loki 3100:3100
-
-# GRPC端点  
-kubectl port-forward -n grafana-stack svc/loki 9095:9095
-```
-
-## ⚙️ 根据负载调整
-
-### 如果仍然遇到速率限制：
-
-1. **增加摄取速率**:
-   ```yaml
-   ingestion_rate_mb: 100  # 增加到100MB/s
-   ingestion_burst_size_mb: 200  # 增加突发到200MB/s
-   ```
-
-2. **增加副本数**:
-   ```yaml
-   replicas: 4  # 部署中增加初始副本
-   maxReplicas: 12  # HPA中增加最大副本
-   ```
-
-3. **增加资源**:
-   ```yaml
-   resources:
-     limits:
-       cpu: 4000m
-       memory: 8Gi
-   ```
-
-### 如果资源使用过高：
-
-1. **减少摄取速率**
-2. **启用压缩**: 
-   ```yaml
-   compress_responses: true
-   ```
-3. **调整chunk参数**:
-   ```yaml
-   chunk_idle_period: 5m  # 增加空闲时间
-   ```
-
-## 🔗 与OpenTelemetry集成
-
-确保您的OpenTelemetry Collector配置中指向正确的Loki端点：
-
-```yaml
-exporters:
-  loki:
-    endpoint: http://loki.grafana-stack.svc.cluster.local:3100/loki/api/v1/push
-```
-
-## 🏷️ 标签策略
-
-为避免高基数问题，建议使用有限的标签集合：
-- `namespace`
-- `pod`  
-- `container`
-- `level` (info, warn, error)
-
-避免使用高基数标签如timestamp、request_id等。 
+**环境类型**: Demo/测试  
+**Loki版本**: 3.1.1  
+**Kubernetes版本**: 1.28+  
+**最后更新**: $(date +%Y-%m-%d) 

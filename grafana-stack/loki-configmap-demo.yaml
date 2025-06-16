@@ -1,0 +1,102 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: grafana-stack
+data:
+  loki.yaml: |
+    # Demo环境配置 - 简化配置，无认证
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+      grpc_listen_port: 9095
+      log_level: info
+
+    # Demo环境限制配置 - 较为宽松
+    limits_config:
+      ingestion_rate_mb: 20
+      ingestion_burst_size_mb: 40
+      max_query_series: 50000
+      max_query_parallelism: 16
+      max_streams_per_user: 50000
+      max_global_streams_per_user: 100000
+      max_label_name_length: 1024
+      max_label_value_length: 4096
+      max_label_names_per_series: 15
+      query_timeout: 300s
+      max_query_length: 168h
+      max_query_lookback: 24h
+      max_entries_limit_per_query: 50000
+      reject_old_samples: true
+      reject_old_samples_max_age: 24h
+      split_queries_by_interval: 15m
+      allow_structured_metadata: true
+
+    common:
+      instance_addr: 127.0.0.1
+      path_prefix: /loki
+      storage:
+        gcs:
+          bucket_name: "loki_44084750"
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+
+    # Demo环境写入器配置
+    ingester:
+      chunk_idle_period: 30m
+      chunk_block_size: 262144
+      chunk_target_size: 1572864
+      chunk_retain_period: 0s
+      concurrent_flushes: 16
+      flush_check_period: 30s
+      
+      wal:
+        enabled: true
+        dir: /loki/wal
+        checkpoint_duration: 5m
+        flush_on_shutdown: true
+
+    # Schema配置 - Demo环境
+    schema_config:
+      configs:
+        - from: 2020-10-24
+          store: tsdb
+          object_store: gcs
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+
+    # 存储配置 - Demo环境
+    storage_config:
+      tsdb_shipper:
+        active_index_directory: /loki/tsdb-shipper-active
+        cache_location: /loki/tsdb-shipper-cache
+        cache_ttl: 24h
+        
+      gcs:
+        bucket_name: "loki_44084750"
+
+    compactor:
+      working_directory: /loki/compactor
+      compaction_interval: 10m
+      retention_enabled: false
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-runtime-config
+  namespace: grafana-stack
+data:
+  runtime-config.yaml: |
+    # Demo环境运行时配置
+    ingestion_rate_strategy: local
+    max_global_streams_per_user: 100000
+    max_query_parallelism: 16
+    ingestion_rate_mb: 20
+    ingestion_burst_size_mb: 40 

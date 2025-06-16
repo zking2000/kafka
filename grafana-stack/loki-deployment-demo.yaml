@@ -1,0 +1,180 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: grafana-stack
+  labels:
+    app: loki
+    component: loki
+    environment: demo
+spec:
+  # Demo环境单副本
+  replicas: 1
+  strategy:
+    type: Recreate  # 简化部署策略
+  selector:
+    matchLabels:
+      app: loki
+      component: loki
+  template:
+    metadata:
+      labels:
+        app: loki
+        component: loki
+        environment: demo
+    spec:
+      # 简化的安全上下文
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+      
+      containers:
+      - name: loki
+        image: grafana/loki:3.1.1
+        imagePullPolicy: IfNotPresent
+        args:
+          - -config.file=/etc/loki/loki.yaml
+          - -log.level=info
+          - -server.path-prefix=/
+          - -target=all
+        
+        ports:
+        - name: http-metrics
+          containerPort: 3100
+          protocol: TCP
+        - name: grpc
+          containerPort: 9095
+          protocol: TCP
+        
+        # Demo环境资源配置 - 较小的资源需求
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        
+        # 简化的健康检查
+        livenessProbe:
+          httpGet:
+            path: /ready
+            port: http-metrics
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 5
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http-metrics
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        # 环境变量
+        env:
+        - name: GOGC
+          value: "100"
+        
+        # 挂载配置
+        volumeMounts:
+        - name: config
+          mountPath: /etc/loki
+          readOnly: true
+        - name: runtime-config
+          mountPath: /etc/loki/runtime-config
+          readOnly: true
+        - name: storage
+          mountPath: /loki
+        - name: wal
+          mountPath: /loki/wal
+        
+        # Demo环境安全上下文
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+          runAsGroup: 10001
+      
+      # 使用Workload Identity的ServiceAccount
+      serviceAccountName: loki-gcs
+      
+      # Demo环境优雅关闭配置
+      terminationGracePeriodSeconds: 60
+      
+      # 卷配置 - Demo环境使用emptyDir
+      volumes:
+      - name: config
+        configMap:
+          name: loki-config
+          defaultMode: 0644
+      - name: runtime-config
+        configMap:
+          name: loki-runtime-config
+          defaultMode: 0644
+      - name: storage
+        emptyDir:
+          sizeLimit: 5Gi  # Demo环境本地缓存
+      - name: wal
+        emptyDir:
+          sizeLimit: 2Gi  # Demo环境WAL存储
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: grafana-stack
+  labels:
+    app: loki
+    component: loki
+    environment: demo
+spec:
+  type: ClusterIP
+  ports:
+  - name: http-metrics
+    port: 3100
+    protocol: TCP
+    targetPort: http-metrics
+  - name: grpc
+    port: 9095
+    protocol: TCP
+    targetPort: grpc
+  selector:
+    app: loki
+    component: loki
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-headless
+  namespace: grafana-stack
+  labels:
+    app: loki
+    component: loki
+    environment: demo
+spec:
+  clusterIP: None
+  ports:
+  - name: http-metrics
+    port: 3100
+    protocol: TCP
+    targetPort: http-metrics
+  - name: grpc
+    port: 9095
+    protocol: TCP
+    targetPort: grpc
+  selector:
+    app: loki
+    component: loki 
