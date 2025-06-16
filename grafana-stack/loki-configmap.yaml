@@ -33,13 +33,14 @@ data:
       max_global_streams_per_user: 500000
       max_label_name_length: 1024
       max_label_value_length: 4096
-      max_label_names_per_series: 30
+      # 3.0+ 默认值从30改为15，但我们保持较高值以兼容现有数据
+      max_label_names_per_series: 20
       
       # 增加查询超时
       query_timeout: 300s
       max_query_length: 721h  # 30天
       
-      # 单次查询返回的最大行数
+      # 单次查询返回的最大行数  
       max_query_lookback: 168h  # 7天
       max_entries_limit_per_query: 100000
       
@@ -49,6 +50,12 @@ data:
       
       # 分片配置
       split_queries_by_interval: 15m
+      
+      # 3.0+ 新增：结构化元数据支持
+      allow_structured_metadata: true
+      
+      # 3.0+ 新增：服务名发现（设为空列表以禁用自动分配）
+      discover_service_name: []
 
     common:
       instance_addr: 127.0.0.1
@@ -74,15 +81,21 @@ data:
         final_sleep: 0s
       
       # 优化chunk配置以提高性能
-      chunk_idle_period: 1m       # 减少chunk空闲时间
+      chunk_idle_period: 30m      # 3.0+ 默认值
       chunk_block_size: 262144    # 256KB
       chunk_target_size: 1572864  # 1.5MB
-      chunk_retain_period: 30s    # 减少chunk保留时间
-      max_transfer_retries: 0
+      chunk_retain_period: 0s     # 3.0+ 默认值
+      
+      # 3.0+ WAL 默认启用，移除 max_transfer_retries
+      # max_transfer_retries: 0  # 已在 3.0+ 中移除
       
       # 增加并发处理能力
       concurrent_flushes: 32
       flush_check_period: 30s
+      
+      # 3.0+ 新增同步配置
+      sync_period: 1h
+      sync_min_utilization: 0.1
       
       # WAL配置
       wal:
@@ -97,12 +110,16 @@ data:
       ring:
         kvstore:
           store: inmemory
-      
+      # 3.0+ 新增：最大行大小限制
+      max_line_size: 256KB
+
     # 查询器配置
     querier:
-      # 增加查询并发性
-      max_concurrent: 20
+      # 3.0+ 调整的默认值
+      max_concurrent: 4  # 从10调整为4
       query_ingesters_within: 3h
+      # 3.0+ 新增：压缩HTTP响应
+      compress_http_responses: true
 
     query_range:
       # 启用结果缓存
@@ -110,64 +127,64 @@ data:
         cache:
           embedded_cache:
             enabled: true
-            max_size_mb: 500
+            max_size_mb: 100  # 3.0+ 从1GB调整为100MB
             ttl: 1h
       
       # 缓存配置
       cache_results: true
       max_retries: 5
       
-      # 分片配置
-      split_queries_by_interval: 15m
+      # 分片配置 - 3.0+ 调整默认值
+      split_queries_by_interval: 1h  # 从30m调整为1h
       align_queries_with_step: true
 
     # 前端配置
     frontend:
-      # 增加工作线程
-      max_outstanding_per_tenant: 4096
+      # 3.0+ 调整的默认值
+      max_outstanding_per_tenant: 32000  # 从100调整为32000
       compress_responses: true
+      
+      # 3.0+ 新增查询字节读取限制
+      max_querier_bytes_read: 150GB
+      max_cache_freshness: 10m
+      max_stats_cache_freshness: 10m
       
       # 下游URL配置
       downstream_url: http://127.0.0.1:3100
 
-    # 表管理器配置
-    table_manager:
-      retention_deletes_enabled: true
-      retention_period: 168h  # 7天保留期
-
     # 压缩器配置
     compactor:
       working_directory: /tmp/loki/compactor
-      shared_store: filesystem
       compaction_interval: 10m
       retention_enabled: true
       retention_delete_delay: 2h
       retention_delete_worker_count: 150
+      # 3.0+ 新增：删除最大间隔
+      delete_max_interval: 24h
 
-    # Schema配置
+    # Schema配置 - 使用TSDB和v13以支持结构化元数据
     schema_config:
       configs:
         - from: 2020-10-24
-          store: boltdb-shipper
+          store: tsdb  # 使用TSDB替代boltdb-shipper
           object_store: filesystem
-          schema: v11
+          schema: v13  # 使用v13以支持结构化元数据
           index:
             prefix: index_
             period: 24h
 
-    # 存储配置
+    # 存储配置 - 更新为TSDB配置
     storage_config:
-      boltdb_shipper:
-        active_index_directory: /tmp/loki/boltdb-shipper-active
-        cache_location: /tmp/loki/boltdb-shipper-cache
+      tsdb_shipper:
+        active_index_directory: /tmp/loki/tsdb-shipper-active
+        cache_location: /tmp/loki/tsdb-shipper-cache
         cache_ttl: 24h
-        shared_store: filesystem
       filesystem:
         directory: /tmp/loki/chunks
 
-    # 运行时配置
-    runtime_config:
-      file: /etc/loki/runtime-config/runtime-config.yaml
+    # 3.0+ 新增：操作配置（替代运行时配置的default部分）
+    operational_config:
+      query_timeout: 300s
 
 ---
 apiVersion: v1
