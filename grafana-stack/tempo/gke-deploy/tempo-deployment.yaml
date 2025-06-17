@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: tempo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  template:
+    metadata:
+      labels:
+        app: tempo
+    spec:
+      containers:
+        - name: tempo
+          image: grafana/tempo:latest
+          env:
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /gcs/gcs.json
+          args:
+            - -config.file=/etc/tempo/tempo.yaml
+          ports:
+            - containerPort: 3100
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+            - name: gcs-secret
+              mountPath: /gcs
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: tempo-config
+        - name: gcs-secret
+          secret:
+            secretName: tempo-gcs-secret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: tempo
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3100
+      targetPort: 3100
+      name: http
+  selector:
+    app: tempo 
