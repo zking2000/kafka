@@ -62,7 +62,7 @@ data:
       # 收集 Kubernetes 容器日志
       filelog:
         include:
-          - /var/log/pods/*/*/*.log
+          - /var/log/pods/ingress-nginx_*/*/*.log
         exclude:
           - /var/log/pods/*/otc-container/*.log
         include_file_name: false
@@ -89,6 +89,15 @@ data:
           - type: add
             field: attributes.k8s.container.name
             value: EXPR(attributes.container_name)
+          - type: regex_parser
+            id: parse_nginx_access_log
+            regex: '^(?P<client_address>\\S+) - (?P<remote_user>\\S+) \\[(?P<timestamp_>[\\w:/]+\\s[+\\-]\\d{4})\\] "(?P<http_request_method>\\S+)\\s(?P<http_request_path>\\S+)\\sHTTP/(?P<http_flavor>\\S+)" (?P<http_status_code>\\d{3}) (?P<http_response_body_size>\\d+) "(?P<http_request_referer>[^"]*)" "(?P<http_user_agent>[^"]*)"'
+            parse_from: attributes.log
+            output: add_nginx_attributes
+          - type: add
+            id: add_nginx_attributes
+            field: attributes.client.address
+            value: EXPR(attributes.client_address)
 
       # 收集主机指标
       hostmetrics:
